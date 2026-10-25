@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "AURA",
+    "slug": "aura-frontend",
+    "version": "2.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aura.academicarchive"
+    },
+    "android": {
+      "package": "com.aura.academicarchive",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
