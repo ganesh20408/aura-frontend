@@ -38,7 +38,7 @@ import InAppPdfReader from './src/components/InAppPdfReader';
 // IMPORTANT: Replace with your live Render URL (e.g. https://aura-backend.onrender.com)
 // when building your APK or testing against cloud hosting!
 // ============================================================================
-const BACKEND_URL = 'http://localhost:3000';
+const BACKEND_URL = 'https://aura-backend-illn.onrender.com';
 
 // --- ACCESSIBLE CHIP GROUP WITH 44pt TOUCH TARGET COMPLIANCE ---
 function AccessibleChipGroup({ options, selected, onSelect, multi = false, renderLabel }) {
