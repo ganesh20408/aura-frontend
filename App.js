@@ -568,10 +568,17 @@ function AuraWorkspace() {
     // 2. Set submitting state to immediately disable button and show spinner
     setAuthSubmitting(true);
 
-    // 3. Render cloud spin-up watchdog (informs user if Render free-tier is cold-starting)
-    const wakeTimer = setTimeout(() => {
-      setAuthNotice('Connecting to server... (Waking up cloud host, please wait)');
-    }, 2800);
+    // 3. Render cloud spin-up watchdog (informs user as Render free-tier boots up)
+    const timers = [];
+    timers.push(setTimeout(() => {
+      setAuthNotice('Connecting to AURA Cloud... (Waking up server, please wait)');
+    }, 2500));
+    timers.push(setTimeout(() => {
+      setAuthNotice('Server spin-up in progress (Render free tier wakes in 30-50s)...');
+    }, 12000));
+    timers.push(setTimeout(() => {
+      setAuthNotice('Almost ready! Establishing secure connection to MongoDB Atlas...');
+    }, 32000));
 
     try {
       const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
@@ -589,10 +596,10 @@ function AuraWorkspace() {
         : { username: cleanUsername, password: cleanPassword };
 
       const res = await axios.post(`${BACKEND_URL}${endpoint}`, payload, {
-        timeout: 20000
+        timeout: 65000
       });
 
-      clearTimeout(wakeTimer);
+      timers.forEach(clearTimeout);
       setAuthNotice('');
 
       if (res.data.pendingApproval) {
@@ -623,7 +630,7 @@ function AuraWorkspace() {
       setUser(res.data.user);
       syncProfileState(res.data.user);
     } catch (err) {
-      clearTimeout(wakeTimer);
+      timers.forEach(clearTimeout);
       setAuthNotice('');
 
       let message = 'An unexpected error occurred. Please try again.';
@@ -632,18 +639,18 @@ function AuraWorkspace() {
         setAuthPendingAdminUser(err.response?.data?.adminUsername || cleanUsername);
         message = err.response?.data?.error || 'Your Administrator account is pending approval by the Primary Administrator.';
       } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        message = 'Network timeout: The server took too long to respond. The cloud service may be waking up. Please tap again.';
+        message = 'Cloud server spin-up timed out. The free hosting takes 30-50s to wake up on first tap. Please tap again now.';
       } else if (err.response?.data?.error) {
         message = err.response.data.error;
       } else if (err.message === 'Network Error' || !err.response) {
-        message = 'Network error: Cannot reach the AURA server. Please check your internet connection.';
+        message = 'Connecting to AURA cloud server... The cloud host is currently waking up from sleep (takes 30-50s on free hosting) or deploying updates. Please wait 10-15 seconds and tap again.';
       } else {
         message = err.message || 'Authentication failed.';
       }
 
       setAuthError(message);
     } finally {
-      clearTimeout(wakeTimer);
+      timers.forEach(clearTimeout);
       setAuthSubmitting(false);
     }
   };
