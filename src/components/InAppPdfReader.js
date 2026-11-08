@@ -1,10 +1,15 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, Platform, StyleSheet, StatusBar as RNStatusBar } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useAuraTheme } from '../theme/ThemeContext';
 
 export default function InAppPdfReader({ visible, pdfUrl, title, onClose }) {
   const { theme } = useAuraTheme();
+  const insets = useSafeAreaInsets();
+  const topInset = Platform.OS === 'android' ? Math.max(insets.top, RNStatusBar.currentHeight || 28) : insets.top;
+  const bottomInset = insets.bottom;
+
   if (!visible || !pdfUrl) return null;
 
   const viewerUrl =
@@ -14,7 +19,16 @@ export default function InAppPdfReader({ visible, pdfUrl, title, onClose }) {
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
-      <View style={[styles.container, { backgroundColor: theme.bg }]}>
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: theme.bg,
+            paddingTop: topInset,
+            paddingBottom: bottomInset
+          }
+        ]}
+      >
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <View style={{ flex: 1, paddingRight: 10 }}>
             <Text style={[styles.badge, { color: theme.accent }]}>

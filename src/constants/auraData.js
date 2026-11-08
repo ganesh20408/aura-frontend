@@ -4,11 +4,32 @@ export const PROFILE_DEPARTMENTS = [
   'AIML', 'DS', 'VLSA', 'EEE(CS)', 'ARCH', 'Fashion Technology', 'Interior design'
 ];
 
-// Strictly only ARCH and DS unlock the 5th Year option
+// Strictly only ARCH and DS have 5th Year (Sem 1 to Sem 10).
+// All other departments have strictly 4 Years (Sem 1 to Sem 8).
 export const FIFTH_YEAR_DEPTS = ['ARCH', 'DS'];
 
-// Valid for Uploading & Searching
-export const RESOURCE_DEPARTMENTS = ['General', ...PROFILE_DEPARTMENTS];
+// 4-Year Curriculum Semesters (All departments except ARCH & DS)
+export const STANDARD_SEMESTERS = [
+  'Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sem 5', 'Sem 6', 'Sem 7', 'Sem 8'
+];
+
+// 5-Year Curriculum Semesters (Strictly ARCH and DS)
+export const EXTENDED_SEMESTERS = [
+  ...STANDARD_SEMESTERS, 'Sem 9', 'Sem 10'
+];
+
+export const SEMESTERS = EXTENDED_SEMESTERS;
+
+export const getAvailableSemesters = (dept) => {
+  return FIFTH_YEAR_DEPTS.includes(dept) ? EXTENDED_SEMESTERS : STANDARD_SEMESTERS;
+};
+
+export const getAvailableYears = (dept) => {
+  return FIFTH_YEAR_DEPTS.includes(dept) ? [1, 2, 3, 4, 5] : [1, 2, 3, 4];
+};
+
+// Valid for Uploading, Filtering & Searching (Includes "All")
+export const RESOURCE_DEPARTMENTS = ['All', ...PROFILE_DEPARTMENTS];
 
 export const ROLES = ['Student', 'Senior Student', 'Faculty', 'Admin'];
 
@@ -16,10 +37,6 @@ export const FACULTY_SUBROLES = ['HOD', 'Professor', 'Assistant Prof', 'Lab Tech
 
 export const RESOURCE_TYPES = [
   'Lecture Notes', 'Question Bank', 'Lab Manual', 'Syllabus', 'Reference Book'
-];
-
-export const SEMESTERS = [
-  'Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sem 5', 'Sem 6', 'Sem 7', 'Sem 8', 'Sem 9', 'Sem 10'
 ];
 
 export const GUIDE_CATEGORIES = [

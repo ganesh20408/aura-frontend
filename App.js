@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  SafeAreaView,
   View,
   Text,
   TextInput,
@@ -12,8 +11,12 @@ import {
   Platform,
   useWindowDimensions,
   Animated,
-  PanResponder
+  PanResponder,
+  StatusBar as RNStatusBar
 } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import axios from 'axios';
@@ -26,6 +29,10 @@ import {
   FACULTY_SUBROLES,
   RESOURCE_TYPES,
   SEMESTERS,
+  STANDARD_SEMESTERS,
+  EXTENDED_SEMESTERS,
+  getAvailableSemesters,
+  getAvailableYears,
   GUIDE_CATEGORIES,
   EXTRACURRICULARS,
   ORDERED_TABS
@@ -33,6 +40,11 @@ import {
 import { ThemeProvider, useAuraTheme } from './src/theme/ThemeContext';
 import AdaptiveNavigation from './src/components/AdaptiveNavigation';
 import InAppPdfReader from './src/components/InAppPdfReader';
+import {
+  initNotificationsAsync,
+  displaySystemNotification,
+  syncIncomingNotifications
+} from './src/services/notificationService';
 
 // ============================================================================
 // IMPORTANT: Replace with your live Render URL (e.g. https://aura-backend.onrender.com)
@@ -123,6 +135,9 @@ function AuraWorkspace() {
   const { theme, isDark, toggleTheme } = useAuraTheme();
   const { width } = useWindowDimensions();
   const isLargeScreen = width >= 768;
+  const insets = useSafeAreaInsets();
+  const topInset = Platform.OS === 'android' ? Math.max(insets.top, RNStatusBar.currentHeight || 28) : insets.top;
+  const bottomInset = insets.bottom;
 
   // --- SESSION & AUTH STATE ---
   const [token, setToken] = useState(null);
@@ -134,6 +149,7 @@ function AuraWorkspace() {
   const [authName, setAuthName] = useState('');
   const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState('');
   const [authRole, setAuthRole] = useState('Student');
   const [authDepartment, setAuthDepartment] = useState('CSE');
   const [authYear, setAuthYear] = useState(1);
@@ -142,6 +158,9 @@ function AuraWorkspace() {
   const [authClubs, setAuthClubs] = useState({
     tech: [], nonTech: [], sports: [], cultural: [], volunteering: []
   });
+  const [authError, setAuthError] = useState('');
+  const [authNotice, setAuthNotice] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
 
   // --- NAVIGATION & ANIMATED TAB TRANSITION STATE ---
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
@@ -210,13 +229,13 @@ function AuraWorkspace() {
 
   // --- TAB 3: Q&A FORM ---
   const [newQuestion, setNewQuestion] = useState('');
-  const [newQuestionDept, setNewQuestionDept] = useState('General');
+  const [newQuestionDept, setNewQuestionDept] = useState('All');
   const [answerInputs, setAnswerInputs] = useState({});
 
   // --- TAB 4: GUIDES FORM ---
   const [guideTitle, setGuideTitle] = useState('');
   const [guideCategory, setGuideCategory] = useState('Placement Tip');
-  const [guideDept, setGuideDept] = useState('General');
+  const [guideDept, setGuideDept] = useState('All');
   const [guideContent, setGuideContent] = useState('');
 
   // --- TAB 5: ASK LAURA AI ---
@@ -227,10 +246,10 @@ function AuraWorkspace() {
   // --- TAB 6: UPLOAD HUB ---
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadCourse, setUploadCourse] = useState('');
-  const [uploadSemester, setUploadSemester] = useState('Sem 3');
+  const [uploadSemester, setUploadSemester] = useState('');
   const [uploadType, setUploadType] = useState('Lecture Notes');
-  const [uploadDept, setUploadDept] = useState('CSE');
-  const [uploadYear, setUploadYear] = useState(1);
+  const [uploadDept, setUploadDept] = useState('All');
+  const [uploadYear, setUploadYear] = useState('All Years');
   const [uploadSummary, setUploadSummary] = useState('');
   const [uploadedPdfUrl, setUploadedPdfUrl] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -258,6 +277,9 @@ function AuraWorkspace() {
     tech: [], nonTech: [], sports: [], cultural: [], volunteering: []
   });
 
+  // --- MAIN ADMIN PERSPECTIVE SWITCHER (POV TESTING) ---
+  const [mainAdminBackup, setMainAdminBackup] = useState(null);
+
   // --- STRICT 5TH YEAR CONDITIONAL RENDERING HELPER ---
   // Returns Year 5 ONLY if department is strictly "ARCH" or "DS"
   const getConditionalYearOptions = (selectedRole, selectedDept) => {
@@ -275,6 +297,14 @@ function AuraWorkspace() {
       try {
         const savedToken = await AsyncStorage.getItem('@aura_token');
         const savedUser = await AsyncStorage.getItem('@aura_user');
+        const savedBackup = await AsyncStorage.getItem('@aura_main_admin_backup');
+        if (savedBackup) {
+          try {
+            setMainAdminBackup(JSON.parse(savedBackup));
+          } catch (e) {
+            console.log('Error parsing admin backup:', e);
+          }
+        }
         if (savedToken && savedUser) {
           const parsedUser = JSON.parse(savedUser);
           setToken(savedToken);
@@ -304,6 +334,20 @@ function AuraWorkspace() {
   useEffect(() => {
     if (token && user) {
       fetchAllData();
+      (async () => {
+        const pushToken = await initNotificationsAsync();
+        if (pushToken) {
+          try {
+            await axios.post(
+              `${BACKEND_URL}/api/users/push-token`,
+              { pushToken },
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+          } catch (e) {
+            console.log('Push token register info:', e.message);
+          }
+        }
+      })();
     }
   }, [token]);
 
@@ -325,6 +369,7 @@ function AuraWorkspace() {
       setGuides(guideList.data);
       setNotifications(noteList.data);
       setProfileStats(statsRes.data);
+      syncIncomingNotifications(noteList.data);
 
       if (user?.role === 'Admin') {
         const usersRes = await axios.get(`${BACKEND_URL}/api/admin/users`, apiHeader);
@@ -335,37 +380,255 @@ function AuraWorkspace() {
     }
   };
 
+  // --- MAIN ADMIN PERSPECTIVE SWITCHER HANDLERS ---
+  const handleSwitchAccount = async (targetUserId, targetName) => {
+    try {
+      const activeAdminToken = mainAdminBackup?.token || token;
+      const res = await axios.post(
+        `${BACKEND_URL}/api/admin/switch-account`,
+        { targetUserId },
+        { headers: { Authorization: `Bearer ${activeAdminToken}` } }
+      );
+
+      // Save original main admin session if not already stored
+      if (!mainAdminBackup) {
+        const backupData = { token, user };
+        await AsyncStorage.setItem('@aura_main_admin_backup', JSON.stringify(backupData));
+        setMainAdminBackup(backupData);
+      }
+
+      await AsyncStorage.setItem('@aura_token', res.data.token);
+      await AsyncStorage.setItem('@aura_user', JSON.stringify(res.data.user));
+      setToken(res.data.token);
+      setUser(res.data.user);
+      syncProfileState(res.data.user);
+
+      Alert.alert(
+        'POV Testing Activated',
+        `Now testing AURA as: ${res.data.user.name} (${res.data.user.role} • ${res.data.user.department}${res.data.user.year ? ` • Yr ${res.data.user.year}` : ''}).\n\nTap "👑 Exit to Main Admin" in the banner to return anytime.`
+      );
+    } catch (err) {
+      Alert.alert('Perspective Switch Alert', err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleSwitchPresetPersona = async (preset) => {
+    try {
+      const activeAdminToken = mainAdminBackup?.token || token;
+      const res = await axios.post(
+        `${BACKEND_URL}/api/admin/switch-account`,
+        preset,
+        { headers: { Authorization: `Bearer ${activeAdminToken}` } }
+      );
+
+      if (!mainAdminBackup) {
+        const backupData = { token, user };
+        await AsyncStorage.setItem('@aura_main_admin_backup', JSON.stringify(backupData));
+        setMainAdminBackup(backupData);
+      }
+
+      await AsyncStorage.setItem('@aura_token', res.data.token);
+      await AsyncStorage.setItem('@aura_user', JSON.stringify(res.data.user));
+      setToken(res.data.token);
+      setUser(res.data.user);
+      syncProfileState(res.data.user);
+
+      Alert.alert(
+        'Preset Persona Activated',
+        `Now testing as: ${res.data.user.name} (${res.data.user.role} • ${res.data.user.department}${res.data.user.year ? ` • Yr ${res.data.user.year}` : ''}).\n\nTap "👑 Exit to Main Admin" in the banner to return anytime.`
+      );
+    } catch (err) {
+      Alert.alert('Persona Switch Alert', err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleSwitchBackToMainAdmin = async () => {
+    try {
+      const backupJson = await AsyncStorage.getItem('@aura_main_admin_backup');
+      const backup = backupJson ? JSON.parse(backupJson) : mainAdminBackup;
+      if (!backup) {
+        Alert.alert('Notice', 'No previous Main Admin session found.');
+        return;
+      }
+
+      await AsyncStorage.removeItem('@aura_main_admin_backup');
+      await AsyncStorage.setItem('@aura_token', backup.token);
+      await AsyncStorage.setItem('@aura_user', JSON.stringify(backup.user));
+
+      setMainAdminBackup(null);
+      setToken(backup.token);
+      setUser(backup.user);
+      syncProfileState(backup.user);
+
+      Alert.alert(
+        'Main Admin Restored',
+        `Welcome back, ${backup.user.name}! Main Admin session has been restored.`
+      );
+    } catch (err) {
+      Alert.alert('Error Returning to Admin', err.message);
+    }
+  };
+
+  // --- OVER-THE-AIR (OTA) EAS UPDATES HANDLER ---
+  const handleCheckForUpdates = async () => {
+    if (__DEV__) {
+      Alert.alert(
+        'Development Mode',
+        'Over-The-Air (OTA) updates run on installed preview/production builds. In development mode, Metro bundler hot-reloads code directly.'
+      );
+      return;
+    }
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        Alert.alert(
+          'Update Found!',
+          'A new update is available. Downloading latest changes now...',
+          [{ text: 'OK' }]
+        );
+        await Updates.fetchUpdateAsync();
+        Alert.alert(
+          'Update Downloaded!',
+          'The latest code and UI improvements have been downloaded over the air. Restart the app now to apply them?',
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Restart Now',
+              onPress: async () => {
+                await Updates.reloadAsync();
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('App Up to Date', 'You are already running the latest version of AURA.');
+      }
+    } catch (e) {
+      Alert.alert('Update Status', `OTA check: ${e.message}`);
+    }
+  };
+
   // --- AUTH SUBMIT ---
   const handleAuthSubmit = async () => {
+    // 1. Instant Client-Side Pre-Flight Validations (0ms immediate feedback)
+    setAuthError('');
+    setAuthNotice('');
+
+    const cleanUsername = authUsername.trim();
+    const cleanPassword = authPassword.trim();
+    const cleanConfirmPassword = authConfirmPassword.trim();
+    const cleanName = authName.trim();
+
+    if (!cleanUsername) {
+      setAuthError('Please enter your username.');
+      return;
+    }
+
+    if (!cleanPassword) {
+      setAuthError('Please enter your password.');
+      return;
+    }
+
+    if (isRegistering) {
+      if (!cleanName) {
+        setAuthError('Please enter your full name.');
+        return;
+      }
+      if (cleanPassword.length < 4) {
+        setAuthError('Password must be at least 4 characters long.');
+        return;
+      }
+      if (cleanPassword !== cleanConfirmPassword) {
+        setAuthError('Password mismatch: Passwords do not match. Please re-enter.');
+        return;
+      }
+    }
+
+    // 2. Set submitting state to immediately disable button and show spinner
+    setAuthSubmitting(true);
+
+    // 3. Render cloud spin-up watchdog (informs user if Render free-tier is cold-starting)
+    const wakeTimer = setTimeout(() => {
+      setAuthNotice('Connecting to server... (Waking up cloud host, please wait)');
+    }, 2800);
+
     try {
       const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
       const payload = isRegistering
         ? {
-            name: authName,
-            username: authUsername,
-            password: authPassword,
+            name: cleanName,
+            username: cleanUsername,
+            password: cleanPassword,
             role: authRole,
-            department: authDepartment,
+            department: authRole === 'Admin' ? 'Administration' : authDepartment,
             year: ['Student', 'Senior Student'].includes(authRole) ? authYear : null,
             facultyRole: authRole === 'Faculty' ? authFacultyRole : null,
-            clubs: authClubs
+            clubs: authRole === 'Admin' ? { tech: [], nonTech: [], sports: [], cultural: [], volunteering: [] } : authClubs
           }
-        : { username: authUsername, password: authPassword };
+        : { username: cleanUsername, password: cleanPassword };
 
-      const res = await axios.post(`${BACKEND_URL}${endpoint}`, payload);
+      const res = await axios.post(`${BACKEND_URL}${endpoint}`, payload, {
+        timeout: 20000
+      });
+
+      clearTimeout(wakeTimer);
+      setAuthNotice('');
+
+      if (res.data.pendingApproval) {
+        Alert.alert(
+          'Admin Registration Submitted',
+          'Your Admin account has been registered! It is pending approval by the primary Admin before access is granted.',
+          [{
+            text: 'OK',
+            onPress: () => {
+              setIsRegistering(false);
+              setAuthPassword('');
+              setAuthConfirmPassword('');
+              setAuthError('');
+            }
+          }]
+        );
+        return;
+      }
+
+      if (res.data.isFirstAdmin) {
+        Alert.alert(
+          'Primary Admin Initialized',
+          'Welcome, Administrator! You are the primary Admin with authority to approve subsequent admin accounts.'
+        );
+      }
+
       await AsyncStorage.setItem('@aura_token', res.data.token);
       await AsyncStorage.setItem('@aura_user', JSON.stringify(res.data.user));
       setToken(res.data.token);
       setUser(res.data.user);
       syncProfileState(res.data.user);
     } catch (err) {
-      Alert.alert('Authentication Alert', err.response?.data?.error || err.message);
+      clearTimeout(wakeTimer);
+      setAuthNotice('');
+
+      let message = 'An unexpected error occurred. Please try again.';
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        message = 'Network timeout: The server took too long to respond. The cloud service may be waking up. Please tap again.';
+      } else if (err.response?.data?.error) {
+        message = err.response.data.error;
+      } else if (err.message === 'Network Error' || !err.response) {
+        message = 'Network error: Cannot reach the AURA server. Please check your internet connection.';
+      } else {
+        message = err.message || 'Authentication failed.';
+      }
+
+      setAuthError(message);
+    } finally {
+      clearTimeout(wakeTimer);
+      setAuthSubmitting(false);
     }
   };
 
   // --- TAB 10: LOGOUT ---
   const handleLogout = async () => {
-    await AsyncStorage.multiRemove(['@aura_token', '@aura_user']);
+    await AsyncStorage.multiRemove(['@aura_token', '@aura_user', '@aura_main_admin_backup']);
+    setMainAdminBackup(null);
     setToken(null);
     setUser(null);
     setResources([]);
@@ -411,7 +674,11 @@ function AuraWorkspace() {
       setUploadedPdfUrl(res.data.pdfUrl);
       if (!uploadTitle) setUploadTitle(res.data.detectedMeta.suggestedTitle);
       setUploadType(res.data.detectedMeta.resourceType);
-      setUploadSemester(res.data.detectedMeta.semester);
+      let detectedSem = res.data.detectedMeta.semester;
+      if (!FIFTH_YEAR_DEPTS.includes(uploadDept) && ['Sem 9', 'Sem 10'].includes(detectedSem)) {
+        detectedSem = 'Sem 8';
+      }
+      setUploadSemester(detectedSem);
       setUploadSummary(res.data.detectedMeta.aiSummary);
 
       Alert.alert('Uploadthing Complete', 'Secure PDF URL received and AI tags detected!');
@@ -426,16 +693,29 @@ function AuraWorkspace() {
     if (!uploadTitle || !uploadedPdfUrl) {
       return Alert.alert('Incomplete', 'Please upload a PDF file first and verify the title.');
     }
+    const finalYear = (uploadYear === 'All Years' || uploadYear === 'All' || uploadYear === 0 || !uploadYear)
+      ? 0
+      : Number(uploadYear);
+    const finalSemester = uploadSemester && uploadSemester !== 'None (Optional)' && uploadSemester !== 'None'
+      ? uploadSemester
+      : null;
+
+    if (finalSemester && ['Sem 9', 'Sem 10'].includes(finalSemester) && !FIFTH_YEAR_DEPTS.includes(uploadDept)) {
+      return Alert.alert('Invalid Semester', `Sem 9 and Sem 10 are strictly restricted to ARCH and DS departments. ${uploadDept} only has Sem 1 through Sem 8.`);
+    }
+    if (finalYear === 5 && !FIFTH_YEAR_DEPTS.includes(uploadDept)) {
+      return Alert.alert('Invalid Academic Year', `5th Year is strictly restricted to ARCH and DS departments. ${uploadDept} only has 4 years.`);
+    }
     try {
       await axios.post(
         `${BACKEND_URL}/api/resources`,
         {
           title: uploadTitle,
           course: uploadCourse || 'Core Subject',
-          semester: uploadSemester,
+          semester: finalSemester,
           resourceType: uploadType,
           department: uploadDept,
-          targetYear: uploadYear,
+          targetYear: finalYear,
           summary: uploadSummary,
           pdfUrl: uploadedPdfUrl
         },
@@ -480,7 +760,19 @@ function AuraWorkspace() {
   // ==========================================================================
   if (loadingSession) {
     return (
-      <View style={[styles.screen, { backgroundColor: theme.bg, justifyContent: 'center', alignItems: 'center' }]}>
+      <View
+        style={[
+          styles.screen,
+          {
+            backgroundColor: theme.bg,
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingTop: topInset,
+            paddingBottom: bottomInset
+          }
+        ]}
+      >
+        <StatusBar style={isDark ? 'light' : 'dark'} translucent />
         <ActivityIndicator size="large" color={theme.primary} />
       </View>
     );
@@ -489,7 +781,17 @@ function AuraWorkspace() {
   if (!user || !token) {
     const conditionalYears = getConditionalYearOptions(authRole, authDepartment);
     return (
-      <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
+      <View
+        style={[
+          styles.screen,
+          {
+            backgroundColor: theme.bg,
+            paddingTop: topInset,
+            paddingBottom: bottomInset
+          }
+        ]}
+      >
+        <StatusBar style={isDark ? 'light' : 'dark'} translucent />
         <ScrollView contentContainerStyle={styles.authContainer}>
           <View style={[styles.authCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <View style={styles.rowBetween}>
@@ -515,8 +817,13 @@ function AuraWorkspace() {
               <TouchableOpacity
                 accessibilityRole="tab"
                 accessibilityState={{ selected: !isRegistering }}
+                disabled={authSubmitting}
                 style={[styles.authToggleBtn, !isRegistering && { backgroundColor: theme.primary }]}
-                onPress={() => setIsRegistering(false)}
+                onPress={() => {
+                  setIsRegistering(false);
+                  setAuthError('');
+                  setAuthNotice('');
+                }}
               >
                 <Text style={{ color: !isRegistering ? '#fff' : theme.textMuted, fontWeight: 'bold' }}>
                   Sign In
@@ -525,8 +832,13 @@ function AuraWorkspace() {
               <TouchableOpacity
                 accessibilityRole="tab"
                 accessibilityState={{ selected: isRegistering }}
+                disabled={authSubmitting}
                 style={[styles.authToggleBtn, isRegistering && { backgroundColor: theme.primary }]}
-                onPress={() => setIsRegistering(true)}
+                onPress={() => {
+                  setIsRegistering(true);
+                  setAuthError('');
+                  setAuthNotice('');
+                }}
               >
                 <Text style={{ color: isRegistering ? '#fff' : theme.textMuted, fontWeight: 'bold' }}>
                   Create Account
@@ -534,13 +846,63 @@ function AuraWorkspace() {
               </TouchableOpacity>
             </View>
 
+            {/* INSTANT CLIENT-SIDE & SERVER ERROR BANNER */}
+            {!!authError && (
+              <View
+                style={[
+                  styles.authAlertBanner,
+                  {
+                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEF2F2',
+                    borderColor: isDark ? '#EF4444' : '#FCA5A5'
+                  }
+                ]}
+              >
+                <Text style={{ fontSize: 16, marginRight: 8 }}>⚠️</Text>
+                <Text
+                  style={[
+                    styles.authAlertText,
+                    { color: isDark ? '#FCA5A5' : '#B91C1C' }
+                  ]}
+                >
+                  {authError}
+                </Text>
+              </View>
+            )}
+
+            {/* RENDER CLOUD HOST WAKE-UP BANNER */}
+            {!!authNotice && (
+              <View
+                style={[
+                  styles.authAlertBanner,
+                  {
+                    backgroundColor: isDark ? 'rgba(59, 130, 246, 0.15)' : '#EFF6FF',
+                    borderColor: isDark ? '#3B82F6' : '#93C5FD'
+                  }
+                ]}
+              >
+                <ActivityIndicator size="small" color={isDark ? '#93C5FD' : '#2563EB'} style={{ marginRight: 8 }} />
+                <Text
+                  style={[
+                    styles.authAlertText,
+                    { color: isDark ? '#93C5FD' : '#1D4ED8' }
+                  ]}
+                >
+                  {authNotice}
+                </Text>
+              </View>
+            )}
+
             {isRegistering && (
               <TextInput
                 style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
                 placeholder="Full Name"
                 placeholderTextColor={theme.textMuted}
                 value={authName}
-                onChangeText={setAuthName}
+                onChangeText={(t) => {
+                  setAuthName(t);
+                  if (authError) setAuthError('');
+                }}
+                editable={!authSubmitting}
               />
             )}
 
@@ -550,7 +912,11 @@ function AuraWorkspace() {
               placeholderTextColor={theme.textMuted}
               autoCapitalize="none"
               value={authUsername}
-              onChangeText={setAuthUsername}
+              onChangeText={(t) => {
+                setAuthUsername(t);
+                if (authError) setAuthError('');
+              }}
+              editable={!authSubmitting}
             />
             <TextInput
               style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
@@ -558,8 +924,27 @@ function AuraWorkspace() {
               placeholderTextColor={theme.textMuted}
               secureTextEntry
               value={authPassword}
-              onChangeText={setAuthPassword}
+              onChangeText={(t) => {
+                setAuthPassword(t);
+                if (authError) setAuthError('');
+              }}
+              editable={!authSubmitting}
             />
+
+            {isRegistering && (
+              <TextInput
+                style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+                placeholder="Confirm Password"
+                placeholderTextColor={theme.textMuted}
+                secureTextEntry
+                value={authConfirmPassword}
+                onChangeText={(t) => {
+                  setAuthConfirmPassword(t);
+                  if (authError) setAuthError('');
+                }}
+                editable={!authSubmitting}
+              />
+            )}
 
             {isRegistering && (
               <>
@@ -574,88 +959,132 @@ function AuraWorkspace() {
                   }}
                 />
 
-                <Text style={[styles.label, { color: theme.text }]}>
-                  2. Academic Department ("General" Restricted)
-                </Text>
-                <AccessibleChipGroup
-                  options={PROFILE_DEPARTMENTS}
-                  selected={authDepartment}
-                  onSelect={(dept) => {
-                    setAuthDepartment(dept);
-                    // Enforce strict 5th Year validation when switching away from ARCH or DS
-                    if (!FIFTH_YEAR_DEPTS.includes(dept) && authYear === 5) {
-                      setAuthYear(4);
-                    }
-                  }}
-                />
-
-                {['Student', 'Senior Student'].includes(authRole) && (
+                {authRole === 'Admin' ? (
+                  <View
+                    style={{
+                      backgroundColor: theme.primarySoft,
+                      borderColor: theme.accent,
+                      borderWidth: 1,
+                      borderRadius: 12,
+                      padding: 14,
+                      marginVertical: 12
+                    }}
+                  >
+                    <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>
+                      🛡️ Administrator Registration (No Extra Details Required)
+                    </Text>
+                    <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
+                      • Admins do not require department, year, or extracurricular clubs.
+                      {'\n'}• The first registered Admin becomes the primary system administrator.
+                      {'\n'}• Subsequent Admin registrations will be held pending your approval.
+                    </Text>
+                  </View>
+                ) : (
                   <>
                     <Text style={[styles.label, { color: theme.text }]}>
-                      3. Academic Year{' '}
-                      {FIFTH_YEAR_DEPTS.includes(authDepartment) && authRole === 'Senior Student'
-                        ? '(5th Year Unlocked for ARCH/DS)'
-                        : ''}
+                      2. Academic Department ("All" Restricted)
                     </Text>
                     <AccessibleChipGroup
-                      options={conditionalYears}
-                      selected={authYear}
-                      onSelect={setAuthYear}
-                      renderLabel={(yr) => `${yr}${yr === 1 ? 'st' : yr === 2 ? 'nd' : yr === 3 ? 'rd' : 'th'} Year`}
+                      options={PROFILE_DEPARTMENTS}
+                      selected={authDepartment}
+                      onSelect={(dept) => {
+                        setAuthDepartment(dept);
+                        // Enforce strict 5th Year validation when switching away from ARCH or DS
+                        if (!FIFTH_YEAR_DEPTS.includes(dept) && authYear === 5) {
+                          setAuthYear(4);
+                        }
+                      }}
                     />
-                  </>
-                )}
 
-                {authRole === 'Faculty' && (
-                  <>
-                    <Text style={[styles.label, { color: theme.text }]}>Faculty Designation</Text>
-                    <AccessibleChipGroup
-                      options={FACULTY_SUBROLES}
-                      selected={authFacultyRole}
-                      onSelect={setAuthFacultyRole}
-                    />
-                  </>
-                )}
-
-                <TouchableOpacity
-                  style={[styles.secondaryBtn, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}
-                  onPress={() => setShowRegClubs(!showRegClubs)}
-                >
-                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                    {showRegClubs ? '▲ Hide Extracurricular Clubs (Skippable)' : '▼ Join Extracurricular Clubs (Optional)'}
-                  </Text>
-                </TouchableOpacity>
-
-                {showRegClubs && (
-                  <View style={{ marginTop: 8 }}>
-                    {Object.entries(EXTRACURRICULARS).map(([catKey, clubArr]) => (
-                      <View key={catKey}>
-                        <Text style={[styles.subLabel, { color: theme.accent }]}>{catKey.toUpperCase()}</Text>
+                    {['Student', 'Senior Student'].includes(authRole) && (
+                      <>
+                        <Text style={[styles.label, { color: theme.text }]}>
+                          3. Academic Year{' '}
+                          {FIFTH_YEAR_DEPTS.includes(authDepartment)
+                            ? '(5-Year Curriculum • Years 1–5, Sem 1–10)'
+                            : '(4-Year Curriculum • Years 1–4, Sem 1–8)'}
+                        </Text>
                         <AccessibleChipGroup
-                          multi
-                          options={clubArr}
-                          selected={authClubs[catKey]}
-                          onSelect={(updated) => setAuthClubs({ ...authClubs, [catKey]: updated })}
+                          options={conditionalYears}
+                          selected={authYear}
+                          onSelect={setAuthYear}
+                          renderLabel={(yr) => `${yr}${yr === 1 ? 'st' : yr === 2 ? 'nd' : yr === 3 ? 'rd' : 'th'} Year`}
                         />
+                      </>
+                    )}
+
+                    {authRole === 'Faculty' && (
+                      <>
+                        <Text style={[styles.label, { color: theme.text }]}>Faculty Designation</Text>
+                        <AccessibleChipGroup
+                          options={FACULTY_SUBROLES}
+                          selected={authFacultyRole}
+                          onSelect={setAuthFacultyRole}
+                        />
+                      </>
+                    )}
+
+                    <TouchableOpacity
+                      style={[styles.secondaryBtn, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}
+                      onPress={() => setShowRegClubs(!showRegClubs)}
+                    >
+                      <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: '700' }}>
+                        {showRegClubs ? '▲ Hide Extracurricular Clubs (Skippable)' : '▼ Join Extracurricular Clubs (Optional)'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {showRegClubs && (
+                      <View style={{ marginTop: 8 }}>
+                        {Object.entries(EXTRACURRICULARS).map(([catKey, clubArr]) => (
+                          <View key={catKey}>
+                            <Text style={[styles.subLabel, { color: theme.accent }]}>{catKey.toUpperCase()}</Text>
+                            <AccessibleChipGroup
+                              multi
+                              options={clubArr}
+                              selected={authClubs[catKey]}
+                              onSelect={(updated) => setAuthClubs({ ...authClubs, [catKey]: updated })}
+                            />
+                          </View>
+                        ))}
                       </View>
-                    ))}
-                  </View>
+                    )}
+                  </>
                 )}
               </>
             )}
 
             <TouchableOpacity
               accessibilityRole="button"
-              style={[styles.primaryBtn, { backgroundColor: theme.primary, marginTop: 14 }]}
+              disabled={authSubmitting}
+              style={[
+                styles.primaryBtn,
+                {
+                  backgroundColor: theme.primary,
+                  marginTop: 14,
+                  opacity: authSubmitting ? 0.75 : 1,
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  alignItems: 'center'
+                }
+              ]}
               onPress={handleAuthSubmit}
             >
-              <Text style={styles.primaryBtnText}>
-                {isRegistering ? 'Complete Registration' : 'Enter AURA Workspace'}
-              </Text>
+              {authSubmitting ? (
+                <>
+                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryBtnText}>
+                    {isRegistering ? 'Creating Account...' : 'Signing In...'}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.primaryBtnText}>
+                  {isRegistering ? 'Complete Registration' : 'Enter AURA Workspace'}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </ScrollView>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -663,22 +1092,26 @@ function AuraWorkspace() {
   // FILTERED DATA STREAMS
   // ==========================================================================
   const smartFeedResources = resources.filter((r) => {
-    const matchesDeptAndYear =
-      r.department === user.department &&
-      (!user.year || Number(r.targetYear) === Number(user.year));
+    const matchesDept =
+      r.department === user.department || r.department === 'All' || r.department === 'General';
+    const matchesYear =
+      !r.targetYear || r.targetYear === 0 || r.targetYear === 'All' || Number(r.targetYear) === Number(user.year);
+    const matchesDeptAndYear = matchesDept && matchesYear;
     const q = localSearch.dashboard.toLowerCase();
     return matchesDeptAndYear && (!q || `${r.title} ${r.course} ${r.summary}`.toLowerCase().includes(q));
   });
 
   const libraryResources = resources.filter((r) => {
-    const allowedDept = r.department === user.department || r.department === 'General';
+    const allowedDept =
+      r.department === user.department || r.department === 'All' || r.department === 'General';
     const q = localSearch.library.toLowerCase();
-    return allowedDept && (!q || `${r.title} ${r.course} ${r.semester} ${r.resourceType}`.toLowerCase().includes(q));
+    return allowedDept && (!q || `${r.title} ${r.course} ${r.semester || ''} ${r.resourceType}`.toLowerCase().includes(q));
   });
 
   const trizGroupedLibrary = {};
   libraryResources.forEach((r) => {
-    const key = `${r.course}  ▸  ${r.semester}  ▸  ${r.resourceType}`;
+    const semLabel = r.semester ? r.semester : 'All Semesters';
+    const key = `${r.course}  ▸  ${semLabel}  ▸  ${r.resourceType}`;
     if (!trizGroupedLibrary[key]) trizGroupedLibrary[key] = [];
     trizGroupedLibrary[key].push(r);
   });
@@ -724,7 +1157,7 @@ function AuraWorkspace() {
         <View style={{ flex: 1, paddingRight: 8 }}>
           <Text style={[styles.cardTitle, { color: theme.text }]}>{item.title}</Text>
           <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600', marginTop: 2 }}>
-            📐 {item.course} • {item.semester} • {item.resourceType} ({item.department} • Yr {item.targetYear})
+            📐 {item.course}{item.semester ? ` • ${item.semester}` : ''} • {item.resourceType} ({item.department} • {item.targetYear === 0 || !item.targetYear ? 'All Years' : `Yr ${item.targetYear}`})
           </Text>
         </View>
         {item.verified ? (
@@ -794,37 +1227,161 @@ function AuraWorkspace() {
               smartFeedResources.map(renderResourceCard)
             )}
 
-            {user.role === 'Admin' && adminUsers.length > 0 && (
-              <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated, marginTop: 14 }]}>
-                <Text style={[styles.subLabel, { color: theme.accent }]}>
-                  🛡️ Admin Account Approval Queue ({adminUsers.length})
-                </Text>
-                {adminUsers.map((u) => (
-                  <View key={u._id} style={[styles.rowBetween, { paddingVertical: 6 }]}>
-                    <Text style={{ color: theme.text, fontSize: 12 }}>
-                      {u.name} (@{u.username}) — {u.role} [{u.department}]
-                    </Text>
-                    <TouchableOpacity
-                      style={[
-                        styles.smallBadgeBtn,
-                        { backgroundColor: u.isApproved ? theme.success : theme.warning }
-                      ]}
-                      onPress={async () => {
-                        await axios.patch(
-                          `${BACKEND_URL}/api/admin/users/${u._id}/approve`,
-                          { isApproved: !u.isApproved },
-                          apiHeader
-                        );
-                        fetchAllData();
-                      }}
-                    >
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
-                        {u.isApproved ? 'Approved' : 'Approve'}
+            {user.role === 'Admin' && (
+              <>
+                {/* 1. PRIMARY ADMIN PERSPECTIVE SWITCHER (POV TESTING) */}
+                {user.isPrimaryAdmin && (
+                  <View
+                    style={[
+                      styles.formBox,
+                      {
+                        backgroundColor: theme.surfaceElevated,
+                        marginTop: 14,
+                        borderColor: theme.accent,
+                        borderWidth: 1
+                      }
+                    ]}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 16, marginRight: 6 }}>👑</Text>
+                      <Text style={[styles.subLabel, { color: theme.accent, fontSize: 13, marginTop: 0, marginBottom: 0 }]}>
+                        Primary Admin POV Testing & Account Switcher
                       </Text>
-                    </TouchableOpacity>
+                    </View>
+                    <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 10, lineHeight: 16 }}>
+                      Only you (the Main Admin) have permission to switch accounts. Test the app from any student, senior, or faculty member's point of view to verify features and refine UX.
+                    </Text>
+
+                    <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: 'bold', marginBottom: 6 }}>
+                      ONE-TAP TEST PERSONAS:
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {[
+                        { label: '🎓 Yr 1 CSE Student', params: { presetRole: 'Student', presetDepartment: 'CSE', presetYear: 1 } },
+                        { label: '🏛️ Yr 5 ARCH Senior', params: { presetRole: 'Senior Student', presetDepartment: 'ARCH', presetYear: 5 } },
+                        { label: '📊 Yr 5 DS Senior', params: { presetRole: 'Senior Student', presetDepartment: 'DS', presetYear: 5 } },
+                        { label: '⚡ Yr 4 EEE Senior', params: { presetRole: 'Senior Student', presetDepartment: 'EEE', presetYear: 4 } },
+                        { label: '👨‍🏫 ECE Professor', params: { presetRole: 'Faculty', presetDepartment: 'ECE', presetFacultyRole: 'Professor' } },
+                        { label: '🛡️ Secondary Admin', params: { presetRole: 'Admin', presetDepartment: 'Administration' } }
+                      ].map((persona) => (
+                        <TouchableOpacity
+                          key={persona.label}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Switch to ${persona.label}`}
+                          style={[
+                            styles.chip,
+                            {
+                              backgroundColor: theme.card,
+                              borderColor: theme.border,
+                              paddingVertical: 6,
+                              paddingHorizontal: 10,
+                              minHeight: 34
+                            }
+                          ]}
+                          onPress={() => handleSwitchPresetPersona(persona.params)}
+                        >
+                          <Text style={{ color: theme.text, fontSize: 11, fontWeight: '600' }}>
+                            {persona.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
-                ))}
-              </View>
+                )}
+
+                {/* 2. REGISTERED ACCOUNTS & APPROVALS QUEUE */}
+                {adminUsers.length > 0 && (
+                  <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated, marginTop: 14 }]}>
+                    <Text style={[styles.subLabel, { color: theme.accent, fontSize: 13 }]}>
+                      🛡️ {user.isPrimaryAdmin ? 'Account Approvals & User POV Directory' : 'User Directory'} ({adminUsers.length})
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 8 }}>
+                      {user.isPrimaryAdmin
+                        ? 'Approve subordinate Admin and Faculty accounts, or tap "👁️ POV" to test an exact user account.'
+                        : 'Subordinate administrator directory.'}
+                    </Text>
+                    {adminUsers.map((u) => {
+                      const isSelf = String(u._id) === String(user._id);
+                      return (
+                        <View
+                          key={u._id}
+                          style={[
+                            styles.rowBetween,
+                            {
+                              paddingVertical: 8,
+                              borderBottomWidth: 1,
+                              borderBottomColor: theme.border
+                            }
+                          ]}
+                        >
+                          <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={{ color: theme.text, fontSize: 12, fontWeight: '700' }}>
+                              {u.name} (@{u.username}) {isSelf ? '👑 [You - Primary Admin]' : (u.isPrimaryAdmin ? '👑 [Primary Admin]' : (u.role === 'Admin' ? '🛡️ [Admin]' : ''))}
+                            </Text>
+                            <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                              Role: {u.role} {u.year ? `• Year ${u.year}` : ''} • Dept: {u.department || 'Administration'}
+                              {u.role === 'Admin' && !u.isApproved ? ' • ⚠️ [Pending Approval]' : ''}
+                            </Text>
+                          </View>
+
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            {!isSelf && user.isPrimaryAdmin && (
+                              <TouchableOpacity
+                                accessibilityRole="button"
+                                accessibilityLabel={`Test perspective of ${u.name}`}
+                                style={[
+                                  styles.smallBadgeBtn,
+                                  { backgroundColor: '#0284c7', marginRight: 6 }
+                                ]}
+                                onPress={() => handleSwitchAccount(u._id, u.name)}
+                              >
+                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
+                                  👁️ POV
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+
+                            {!isSelf && user.isPrimaryAdmin ? (
+                              <TouchableOpacity
+                                style={[
+                                  styles.smallBadgeBtn,
+                                  { backgroundColor: u.isApproved ? theme.success : theme.warning }
+                                ]}
+                                onPress={async () => {
+                                  try {
+                                    await axios.patch(
+                                      `${BACKEND_URL}/api/admin/users/${u._id}/approve`,
+                                      { isApproved: !u.isApproved },
+                                      apiHeader
+                                    );
+                                    fetchAllData();
+                                  } catch (err) {
+                                    Alert.alert('Approval Action Alert', err.response?.data?.error || err.message);
+                                  }
+                                }}
+                              >
+                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
+                                  {u.isApproved ? 'Approved ✓' : 'Approve ⚠️'}
+                                </Text>
+                              </TouchableOpacity>
+                            ) : isSelf ? (
+                              <View style={[styles.smallBadgeBtn, { backgroundColor: theme.primary }]}>
+                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>Active Admin</Text>
+                              </View>
+                            ) : (
+                              <View style={[styles.smallBadgeBtn, { backgroundColor: u.isApproved ? theme.success : theme.warning }]}>
+                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
+                                  {u.isApproved ? 'Approved' : 'Pending'}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </>
             )}
           </View>
         );
@@ -834,7 +1391,7 @@ function AuraWorkspace() {
           <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text style={[styles.sectionHeader, { color: theme.text }]}>📚 2. Academic Library</Text>
             <Text style={[styles.sectionSub, { color: theme.textMuted }]}>
-              Multi-level TRIZ Dimension hierarchy (Course ▸ Semester ▸ Type) for {user.department} + General.
+              Multi-level TRIZ Dimension hierarchy (Course ▸ Semester ▸ Type) for {user.department} + All.
             </Text>
             <LocalizedSearchBar
               sectionLabel="Academic Library"
@@ -1107,20 +1664,55 @@ function AuraWorkspace() {
               onChangeText={setUploadCourse}
             />
 
-            <Text style={[styles.subLabel, { color: theme.accent }]}>Department ("General" Allowed Here)</Text>
-            <AccessibleChipGroup options={RESOURCE_DEPARTMENTS} selected={uploadDept} onSelect={setUploadDept} />
+            <Text style={[styles.subLabel, { color: theme.accent }]}>Department ("All" Allowed Here)</Text>
+            <AccessibleChipGroup
+              options={RESOURCE_DEPARTMENTS}
+              selected={uploadDept}
+              onSelect={(dept) => {
+                setUploadDept(dept);
+                // Strict 5th Year and Sem 9/10 reset for non-ARCH/DS departments
+                if (!FIFTH_YEAR_DEPTS.includes(dept)) {
+                  if (uploadYear === 5) setUploadYear('All Years');
+                  if (['Sem 9', 'Sem 10'].includes(uploadSemester)) setUploadSemester('');
+                }
+              }}
+            />
 
-            <Text style={[styles.subLabel, { color: theme.accent }]}>Semester</Text>
-            <AccessibleChipGroup options={SEMESTERS} selected={uploadSemester} onSelect={setUploadSemester} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+              <Text style={[styles.subLabel, { color: theme.accent, marginBottom: 0 }]}>
+                Semester (Optional){' '}
+                {FIFTH_YEAR_DEPTS.includes(uploadDept)
+                  ? '(Sem 1–10 • ARCH/DS)'
+                  : '(Sem 1–8)'}
+              </Text>
+              {uploadSemester ? (
+                <TouchableOpacity onPress={() => setUploadSemester('')}>
+                  <Text style={{ color: theme.danger, fontSize: 11, fontWeight: 'bold' }}>✕ Clear (Optional)</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={{ color: theme.textMuted, fontSize: 11, fontStyle: 'italic' }}>Optional / All Semesters</Text>
+              )}
+            </View>
+            <AccessibleChipGroup
+              options={['None (Optional)', ...getAvailableSemesters(uploadDept)]}
+              selected={uploadSemester || 'None (Optional)'}
+              onSelect={(sem) => setUploadSemester(sem === 'None (Optional)' ? '' : sem)}
+            />
 
             <Text style={[styles.subLabel, { color: theme.accent }]}>Resource Type</Text>
             <AccessibleChipGroup options={RESOURCE_TYPES} selected={uploadType} onSelect={setUploadType} />
 
-            <Text style={[styles.subLabel, { color: theme.accent }]}>Target Academic Year</Text>
+            <Text style={[styles.subLabel, { color: theme.accent }]}>
+              Target Academic Year (Required){' '}
+              {FIFTH_YEAR_DEPTS.includes(uploadDept)
+                ? '(Years 1–5 or All Years • ARCH/DS)'
+                : '(Years 1–4 or All Years)'}
+            </Text>
             <AccessibleChipGroup
-              options={FIFTH_YEAR_DEPTS.includes(uploadDept) ? [1, 2, 3, 4, 5] : [1, 2, 3, 4]}
+              options={['All Years', ...getAvailableYears(uploadDept)]}
               selected={uploadYear}
               onSelect={setUploadYear}
+              renderLabel={(yr) => (yr === 'All Years' ? '🌟 All Years' : `Year ${yr}`)}
             />
 
             <TextInput
@@ -1238,21 +1830,39 @@ function AuraWorkspace() {
 
                 {!noteTargetAll && (
                   <>
-                    {!noteTargetAllYears && (
-                      <>
-                        <Text style={[styles.subLabel, { color: theme.accent }]}>Specific Years</Text>
-                        <AccessibleChipGroup
-                          multi
-                          options={[1, 2, 3, 4, 5]}
-                          selected={noteYears}
-                          onSelect={setNoteYears}
-                          renderLabel={(y) => `Year ${y}`}
-                        />
-                      </>
-                    )}
+                    <Text style={[styles.subLabel, { color: theme.accent }]}>Target Years</Text>
+                    <AccessibleChipGroup
+                      multi
+                      options={['All Years', 1, 2, 3, 4, 5]}
+                      selected={noteTargetAllYears ? ['All Years'] : noteYears}
+                      onSelect={(arr) => {
+                        if (arr.includes('All Years')) {
+                          setNoteTargetAllYears(true);
+                          setNoteYears([]);
+                        } else {
+                          setNoteTargetAllYears(false);
+                          setNoteYears(arr.filter((y) => y !== 'All Years'));
+                        }
+                      }}
+                      renderLabel={(y) => (y === 'All Years' ? '🌟 All Years' : `Year ${y}${y === 5 ? ' (ARCH/DS)' : ''}`)}
+                    />
 
                     <Text style={[styles.subLabel, { color: theme.accent }]}>Target Departments</Text>
-                    <AccessibleChipGroup multi options={PROFILE_DEPARTMENTS} selected={noteDepts} onSelect={setNoteDepts} />
+                    <AccessibleChipGroup
+                      multi
+                      options={['All', ...PROFILE_DEPARTMENTS]}
+                      selected={noteDepts}
+                      onSelect={(arr) => {
+                        if (arr.includes('All') && !noteDepts.includes('All')) {
+                          setNoteDepts(['All']);
+                        } else if (noteDepts.includes('All') && arr.length > 1) {
+                          setNoteDepts(arr.filter((d) => d !== 'All'));
+                        } else {
+                          setNoteDepts(arr);
+                        }
+                      }}
+                      renderLabel={(d) => (d === 'All' ? '🌐 All Departments' : d)}
+                    />
 
                     <Text style={[styles.subLabel, { color: theme.accent }]}>Target Tech Clubs</Text>
                     <AccessibleChipGroup multi options={EXTRACURRICULARS.tech} selected={noteTechClubs} onSelect={setNoteTechClubs} />
@@ -1275,14 +1885,16 @@ function AuraWorkspace() {
                   style={[styles.primaryBtn, { backgroundColor: theme.primary, marginTop: 10 }]}
                   onPress={async () => {
                     if (!noteTitle || !noteMsg) return;
+                    const isAllYears = noteTargetAllYears || noteYears.includes('All Years');
+                    const cleanYears = isAllYears ? [] : noteYears.filter((y) => y !== 'All Years').map(Number);
                     await axios.post(
                       `${BACKEND_URL}/api/notifications`,
                       {
                         title: noteTitle,
                         message: noteMsg,
                         targetAll: noteTargetAll,
-                        targetAllYears: noteTargetAllYears,
-                        targetYears: noteYears,
+                        targetAllYears: isAllYears,
+                        targetYears: cleanYears,
                         targetDepartments: noteDepts,
                         targetTechClubs: noteTechClubs,
                         targetNonTechClubs: noteNonTechClubs,
@@ -1292,13 +1904,37 @@ function AuraWorkspace() {
                       },
                       apiHeader
                     );
+                    await displaySystemNotification({
+                      title: noteTitle,
+                      body: noteMsg
+                    });
                     setNoteTitle('');
                     setNoteMsg('');
                     fetchAllData();
-                    Alert.alert('Dispatched!', 'Targeted notification sent.');
+                    Alert.alert(
+                      'Dispatched!',
+                      'Targeted notification sent to the campus feed and delivered directly to the phone notification bar outside the app.'
+                    );
                   }}
                 >
                   <Text style={styles.primaryBtnText}>Send Multi-Target Broadcast</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Test Notification in Phone's Notification Bar"
+                  style={[styles.secondaryBtn, { borderColor: theme.accent, marginTop: 8 }]}
+                  onPress={async () => {
+                    await displaySystemNotification({
+                      title: 'AURA System Test Alert',
+                      body: 'Testing notification bar alert! Notifications are successfully delivered to your phone outside the app.'
+                    });
+                    Alert.alert('Alert Delivered', 'Check your phone’s notification bar at the top of your screen.');
+                  }}
+                >
+                  <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 12 }}>
+                    🔔 Test Alert in Phone's Notification Bar
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1331,6 +1967,51 @@ function AuraWorkspace() {
               onChange={(v) => updateLocalSearch('profile', v)}
             />
 
+            {mainAdminBackup && (
+              <View
+                style={{
+                  backgroundColor: '#fef3c7',
+                  borderColor: '#f59e0b',
+                  borderWidth: 1,
+                  borderRadius: 10,
+                  padding: 12,
+                  marginBottom: 14
+                }}
+              >
+                <Text style={{ color: '#92400e', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>
+                  🧪 Active POV Test Mode
+                </Text>
+                <Text style={{ color: '#78350f', fontSize: 12, lineHeight: 18, marginBottom: 8 }}>
+                  You are viewing and testing this profile as {user.name} ({user.role} • {user.department}{user.year ? ` • Yr ${user.year}` : ''}).
+                </Text>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Exit POV testing mode and return to Main Admin"
+                  style={{
+                    backgroundColor: '#0f172a',
+                    paddingVertical: 8,
+                    paddingHorizontal: 12,
+                    borderRadius: 6,
+                    alignSelf: 'flex-start'
+                  }}
+                  onPress={handleSwitchBackToMainAdmin}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>👑 Exit POV to Main Admin</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {user.isPrimaryAdmin && (
+              <View style={{ backgroundColor: 'rgba(217, 119, 6, 0.12)', borderColor: '#d97706', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 12 }}>
+                <Text style={{ color: '#d97706', fontWeight: 'bold', fontSize: 12 }}>
+                  👑 Verified Main Administrator
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
+                  Sole authority for account switching, perspective testing, and admin approvals.
+                </Text>
+              </View>
+            )}
+
             {profileStats && (
               <View style={styles.statsGrid}>
                 <View style={[styles.statBox, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -1359,59 +2040,81 @@ function AuraWorkspace() {
               onChangeText={setEditName}
             />
 
-            <Text style={[styles.subLabel, { color: theme.accent }]}>
-              Academic Department ("General" Prohibited)
-            </Text>
-            <AccessibleChipGroup
-              options={PROFILE_DEPARTMENTS}
-              selected={editDept}
-              onSelect={(d) => {
-                setEditDept(d);
-                // Enforce strict 5th Year reset if switching away from ARCH or DS
-                if (!FIFTH_YEAR_DEPTS.includes(d) && editYear === 5) {
-                  setEditYear(4);
-                }
-              }}
-            />
-
-            {['Student', 'Senior Student'].includes(editRole) && (
+            {editRole === 'Admin' ? (
+              <View
+                style={{
+                  backgroundColor: theme.primarySoft,
+                  borderColor: theme.accent,
+                  borderWidth: 1,
+                  borderRadius: 10,
+                  padding: 12,
+                  marginVertical: 12
+                }}
+              >
+                <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>
+                  🛡️ Administrator Account
+                </Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
+                  Root administrative account. Department and extracurricular clubs are not applicable to the administrator role.
+                </Text>
+              </View>
+            ) : (
               <>
                 <Text style={[styles.subLabel, { color: theme.accent }]}>
-                  Academic Year{' '}
-                  {FIFTH_YEAR_DEPTS.includes(editDept) && editRole === 'Senior Student'
-                    ? '(5th Year Visible for ARCH/DS)'
-                    : '(Years 1–4)'}
+                  Academic Department ("All" Prohibited)
                 </Text>
                 <AccessibleChipGroup
-                  options={profileConditionalYears}
-                  selected={editYear}
-                  onSelect={setEditYear}
-                  renderLabel={(yr) => `${yr}${yr === 1 ? 'st' : yr === 2 ? 'nd' : yr === 3 ? 'rd' : 'th'} Year`}
+                  options={PROFILE_DEPARTMENTS}
+                  selected={editDept}
+                  onSelect={(d) => {
+                    setEditDept(d);
+                    // Enforce strict 5th Year reset if switching away from ARCH or DS
+                    if (!FIFTH_YEAR_DEPTS.includes(d) && editYear === 5) {
+                      setEditYear(4);
+                    }
+                  }}
                 />
+
+                {['Student', 'Senior Student'].includes(editRole) && (
+                  <>
+                    <Text style={[styles.subLabel, { color: theme.accent }]}>
+                      Academic Year{' '}
+                      {FIFTH_YEAR_DEPTS.includes(editDept) && editRole === 'Senior Student'
+                        ? '(5-Year Curriculum • Years 1–5, Sem 1–10)'
+                        : '(4-Year Curriculum • Years 1–4, Sem 1–8)'}
+                    </Text>
+                    <AccessibleChipGroup
+                      options={profileConditionalYears}
+                      selected={editYear}
+                      onSelect={setEditYear}
+                      renderLabel={(yr) => `${yr}${yr === 1 ? 'st' : yr === 2 ? 'nd' : yr === 3 ? 'rd' : 'th'} Year`}
+                    />
+                  </>
+                )}
+
+                <Text style={[styles.subLabel, { color: theme.accent, marginTop: 14 }]}>
+                  Update Extracurricular Club Memberships
+                </Text>
+                {Object.entries(EXTRACURRICULARS).map(([catKey, clubList]) => {
+                  const filteredClubs = clubList.filter(
+                    (c) => !localSearch.profile || c.toLowerCase().includes(localSearch.profile.toLowerCase())
+                  );
+                  return (
+                    <View key={catKey} style={{ marginBottom: 8 }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: 'bold', marginBottom: 4 }}>
+                        {catKey.toUpperCase()}
+                      </Text>
+                      <AccessibleChipGroup
+                        multi
+                        options={filteredClubs}
+                        selected={editClubs[catKey] || []}
+                        onSelect={(arr) => setEditClubs({ ...editClubs, [catKey]: arr })}
+                      />
+                    </View>
+                  );
+                })}
               </>
             )}
-
-            <Text style={[styles.subLabel, { color: theme.accent, marginTop: 14 }]}>
-              Update Extracurricular Club Memberships
-            </Text>
-            {Object.entries(EXTRACURRICULARS).map(([catKey, clubList]) => {
-              const filteredClubs = clubList.filter(
-                (c) => !localSearch.profile || c.toLowerCase().includes(localSearch.profile.toLowerCase())
-              );
-              return (
-                <View key={catKey} style={{ marginBottom: 8 }}>
-                  <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: 'bold', marginBottom: 4 }}>
-                    {catKey.toUpperCase()}
-                  </Text>
-                  <AccessibleChipGroup
-                    multi
-                    options={filteredClubs}
-                    selected={editClubs[catKey] || []}
-                    onSelect={(arr) => setEditClubs({ ...editClubs, [catKey]: arr })}
-                  />
-                </View>
-              );
-            })}
 
             <TouchableOpacity
               style={[styles.primaryBtn, { backgroundColor: theme.primary, marginTop: 12 }]}
@@ -1422,10 +2125,10 @@ function AuraWorkspace() {
                     {
                       name: editName,
                       role: editRole,
-                      department: editDept,
-                      year: editYear,
-                      facultyRole: editFacultyRole,
-                      clubs: editClubs
+                      department: editRole === 'Admin' ? 'Administration' : editDept,
+                      year: ['Student', 'Senior Student'].includes(editRole) ? editYear : null,
+                      facultyRole: editRole === 'Faculty' ? editFacultyRole : null,
+                      clubs: editRole === 'Admin' ? { tech: [], nonTech: [], sports: [], cultural: [], volunteering: [] } : editClubs
                     },
                     apiHeader
                   );
@@ -1440,6 +2143,24 @@ function AuraWorkspace() {
             >
               <Text style={styles.primaryBtnText}>Save Profile Changes</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Check for Over-The-Air Updates"
+              style={[
+                styles.secondaryBtn,
+                {
+                  borderColor: theme.accent,
+                  marginTop: 10,
+                  backgroundColor: theme.primarySoft
+                }
+              ]}
+              onPress={handleCheckForUpdates}
+            >
+              <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 13 }}>
+                🔄 Check for Over-The-Air (OTA) Updates
+              </Text>
+            </TouchableOpacity>
           </View>
         );
       }
@@ -1450,7 +2171,44 @@ function AuraWorkspace() {
   };
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]} {...panResponder.panHandlers}>
+    <View
+      style={[
+        styles.screen,
+        {
+          backgroundColor: theme.bg,
+          paddingTop: topInset,
+          paddingBottom: bottomInset
+        }
+      ]}
+      {...panResponder.panHandlers}
+    >
+      <StatusBar style={isDark ? 'light' : 'dark'} translucent />
+      {/* PERSISTENT MAIN ADMIN POV TESTING BANNER */}
+      {mainAdminBackup && (
+        <View style={[styles.povBanner, { backgroundColor: '#f59e0b', borderBottomColor: '#d97706' }]}>
+          <View style={{ flex: 1, marginRight: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={{ fontSize: 13, marginRight: 4 }}>🧪</Text>
+              <Text style={styles.povBadgeText}>POV TEST MODE</Text>
+            </View>
+            <Text style={styles.povTitleText} numberOfLines={1}>
+              {user?.name} ({user?.role}{user?.year ? ` • Yr ${user?.year}` : ''} • {user?.department})
+            </Text>
+            <Text style={styles.povSubText} numberOfLines={1}>
+              Previewing user experience. Original Admin: {mainAdminBackup.user?.name}
+            </Text>
+          </View>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Exit POV testing mode and return to Main Admin"
+            style={styles.povExitBtn}
+            onPress={handleSwitchBackToMainAdmin}
+          >
+            <Text style={styles.povExitBtnText}>👑 Exit POV</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* MOBILE-FIRST TOP BAR (Shown when Sticky Sidebar is hidden on smaller viewports) */}
       {!isLargeScreen && (
         <View style={[styles.mobileTopBar, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
@@ -1494,6 +2252,8 @@ function AuraWorkspace() {
           activeTabKey={activeTabKey}
           onSelectTab={handleSelectNavigationTab}
           user={user}
+          mainAdminBackup={mainAdminBackup}
+          onExitPOV={handleSwitchBackToMainAdmin}
         />
 
         {/* ANIMATED MAIN VIEWPORT */}
@@ -1519,15 +2279,17 @@ function AuraWorkspace() {
         title={pdfModal.title}
         onClose={() => setPdfModal({ visible: false, url: '', title: '' })}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuraWorkspace />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <AuraWorkspace />
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -1631,6 +2393,20 @@ const styles = StyleSheet.create({
   },
   authToggleRow: { flexDirection: 'row', marginVertical: 14, borderRadius: 10, padding: 4 },
   authToggleBtn: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 8 },
+  authAlertBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 12
+  },
+  authAlertText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18
+  },
   input: {
     paddingHorizontal: 12,
     paddingVertical: 11,
@@ -1688,5 +2464,46 @@ const styles = StyleSheet.create({
     borderWidth: 1
   },
   statNumber: { fontSize: 20, fontWeight: '900' },
-  smallBadgeBtn: { minHeight: 34, paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center' }
+  smallBadgeBtn: { minHeight: 34, paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center' },
+  povBanner: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 999
+  },
+  povBadgeText: {
+    color: '#78350f',
+    fontWeight: '900',
+    fontSize: 10,
+    letterSpacing: 0.5
+  },
+  povTitleText: {
+    color: '#0f172a',
+    fontWeight: 'bold',
+    fontSize: 13,
+    marginTop: 2
+  },
+  povSubText: {
+    color: '#78350f',
+    fontSize: 11
+  },
+  povExitBtn: {
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 7,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3
+  },
+  povExitBtnText: {
+    color: '#f8fafc',
+    fontWeight: '800',
+    fontSize: 12
+  }
 });

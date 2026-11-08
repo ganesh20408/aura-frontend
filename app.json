@@ -5,21 +5,47 @@
     "version": "2.0.0",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
     "assetBundlePatterns": [
       "**/*"
     ],
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2563EB",
+          "sounds": []
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.aura.academicarchive"
+      "bundleIdentifier": "com.aura.academicarchive",
+      "icon": "./assets/icon.png"
     },
     "android": {
       "package": "com.aura.academicarchive",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#0f172a"
       }
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b673f145-dfb8-4620-900b-0b4756401ee3"
+      }
+    },
+    "owner": "ganesh20408",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b673f145-dfb8-4620-900b-0b4756401ee3"
     }
   }
 }

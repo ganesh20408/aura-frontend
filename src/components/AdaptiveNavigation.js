@@ -7,8 +7,11 @@ import {
   Animated,
   ScrollView,
   StyleSheet,
-  Pressable
+  Pressable,
+  Platform,
+  StatusBar as RNStatusBar
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ORDERED_TABS } from '../constants/auraData';
 import { useAuraTheme } from '../theme/ThemeContext';
 
@@ -20,9 +23,14 @@ export default function AdaptiveNavigation({
   setOffCanvasVisible,
   activeTabKey,
   onSelectTab,
-  user
+  user,
+  mainAdminBackup,
+  onExitPOV
 }) {
   const { theme, isDark, toggleTheme } = useAuraTheme();
+  const insets = useSafeAreaInsets();
+  const topInset = Platform.OS === 'android' ? Math.max(insets.top, RNStatusBar.currentHeight || 28) : insets.top;
+  const bottomInset = insets.bottom;
   const slideAnim = useRef(new Animated.Value(-320)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
 
@@ -175,6 +183,28 @@ export default function AdaptiveNavigation({
             </TouchableOpacity>
           </View>
 
+          {mainAdminBackup && (
+            <View style={{ paddingHorizontal: sidebarExpanded ? 10 : 8, marginTop: 8 }}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Exit POV testing mode and return to Main Admin"
+                style={{
+                  backgroundColor: '#f59e0b',
+                  paddingVertical: 7,
+                  paddingHorizontal: sidebarExpanded ? 10 : 4,
+                  borderRadius: 8,
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onPress={onExitPOV}
+              >
+                <Text style={{ color: '#0f172a', fontWeight: '800', fontSize: sidebarExpanded ? 11 : 14 }}>
+                  {sidebarExpanded ? '👑 Exit to Main Admin' : '👑'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <ScrollView showsVerticalScrollIndicator={false} style={{ marginTop: 8 }}>
             {renderTabItems(sidebarExpanded, false)}
           </ScrollView>
@@ -203,7 +233,9 @@ export default function AdaptiveNavigation({
               {
                 backgroundColor: theme.surface,
                 borderRightColor: theme.border,
-                transform: [{ translateX: slideAnim }]
+                transform: [{ translateX: slideAnim }],
+                paddingTop: topInset,
+                paddingBottom: bottomInset
               }
             ]}
           >
@@ -238,6 +270,25 @@ export default function AdaptiveNavigation({
                   {isDark ? '☀️ Switch to Clean Light Mode' : '🌙 Switch to Deep Slate Dark Mode'}
                 </Text>
               </TouchableOpacity>
+
+              {mainAdminBackup && (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Exit POV testing mode and return to Main Admin"
+                  style={[
+                    styles.utilityBtn,
+                    { backgroundColor: '#f59e0b', borderColor: '#d97706', marginBottom: 8 }
+                  ]}
+                  onPress={() => {
+                    setOffCanvasVisible(false);
+                    onExitPOV && onExitPOV();
+                  }}
+                >
+                  <Text style={{ color: '#0f172a', fontWeight: '800', fontSize: 12 }}>
+                    👑 Exit POV to Main Admin
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <ScrollView contentContainerStyle={{ padding: 12 }}>

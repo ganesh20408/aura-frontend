@@ -1,0 +1,19 @@
+# Ignore large binaries and artifacts
+*.apk
+*.aab
+*.zip
+*.tar.gz
+
+# Dependencies
+node_modules/
+.expo/
+dist/
+web-build/
+.git/
+
+# OS and temp files
+.DS_Store
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*

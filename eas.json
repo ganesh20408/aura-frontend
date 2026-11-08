@@ -5,17 +5,40 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "channel": "preview",
+      "env": {
+        "EAS_GRADLE_CACHE": "1"
+      },
+      "cache": {
+        "key": "aura-cache-v1",
+        "paths": [
+          "node_modules",
+          ".gradle"
+        ]
       }
     },
     "production": {
       "android": {
         "buildType": "apk"
+      },
+      "channel": "production",
+      "env": {
+        "EAS_GRADLE_CACHE": "1"
+      },
+      "cache": {
+        "key": "aura-cache-v1",
+        "paths": [
+          "node_modules",
+          ".gradle"
+        ]
       }
     }
   },
