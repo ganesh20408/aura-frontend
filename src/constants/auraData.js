@@ -78,3 +78,26 @@ export const ORDERED_TABS = [
   { id: 9, key: 'profile', label: '9. Profile', shortLabel: 'Profile', icon: '👤', desc: 'Stats, Dept/Year & Club arrays' },
   { id: 10, key: 'logout', label: '10. Logout', shortLabel: 'Logout', icon: '🚪', desc: 'Wipe session & local cache' }
 ];
+
+export function getOrderedTabs(user) {
+  const tabs = [...ORDERED_TABS];
+  if (user?.isPrimaryAdmin) {
+    const profileIdx = tabs.findIndex(t => t.key === 'profile');
+    if (profileIdx !== -1) {
+      tabs.splice(profileIdx + 1, 0, {
+        id: 10,
+        key: 'approvals',
+        label: '10. Account Approvals',
+        shortLabel: 'Approvals',
+        icon: '🛡️',
+        desc: 'Review & approve Admin registrations'
+      });
+      const logoutTab = tabs.find(t => t.key === 'logout');
+      if (logoutTab) {
+        logoutTab.id = 11;
+        logoutTab.label = '11. Logout';
+      }
+    }
+  }
+  return tabs;
+}

@@ -12,7 +12,7 @@ import {
   StatusBar as RNStatusBar
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ORDERED_TABS } from '../constants/auraData';
+import { ORDERED_TABS, getOrderedTabs } from '../constants/auraData';
 import { useAuraTheme } from '../theme/ThemeContext';
 
 export default function AdaptiveNavigation({
@@ -66,7 +66,7 @@ export default function AdaptiveNavigation({
   }, [offCanvasVisible]);
 
   const renderTabItems = (isExpandedView, closeAfterPress = false) =>
-    ORDERED_TABS.map((tab) => {
+    getOrderedTabs(user).map((tab) => {
       const isActive = activeTabKey === tab.key;
       const isLogout = tab.key === 'logout';
       return (

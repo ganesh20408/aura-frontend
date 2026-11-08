@@ -35,7 +35,8 @@ import {
   getAvailableYears,
   GUIDE_CATEGORIES,
   EXTRACURRICULARS,
-  ORDERED_TABS
+  ORDERED_TABS,
+  getOrderedTabs
 } from './src/constants/auraData';
 import { ThemeProvider, useAuraTheme } from './src/theme/ThemeContext';
 import AdaptiveNavigation from './src/components/AdaptiveNavigation';
@@ -161,6 +162,8 @@ function AuraWorkspace() {
   const [authError, setAuthError] = useState('');
   const [authNotice, setAuthNotice] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [authApprovalPending, setAuthApprovalPending] = useState(false);
+  const [authPendingAdminUser, setAuthPendingAdminUser] = useState('');
 
   // --- NAVIGATION & ANIMATED TAB TRANSITION STATE ---
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
@@ -211,7 +214,8 @@ function AuraWorkspace() {
     upload: '',
     search: '',
     notifications: '',
-    profile: ''
+    profile: '',
+    approvals: ''
   });
   const updateLocalSearch = (key, val) =>
     setLocalSearch((prev) => ({ ...prev, [key]: val }));
@@ -387,10 +391,13 @@ function AuraWorkspace() {
 
       if (user?.role === 'Admin') {
         const usersRes = await axios.get(`${BACKEND_URL}/api/admin/users`, apiHeader);
-        setAdminUsers(usersRes.data);
+        setAdminUsers(usersRes.data.users || usersRes.data);
       }
     } catch (err) {
       console.log('Sync error:', err.message);
+      if (err.response?.status === 401) {
+        handleLogout();
+      }
     }
   };
 
@@ -589,18 +596,16 @@ function AuraWorkspace() {
       setAuthNotice('');
 
       if (res.data.pendingApproval) {
+        setIsRegistering(false);
+        setAuthPassword('');
+        setAuthConfirmPassword('');
+        setAuthApprovalPending(true);
+        setAuthPendingAdminUser(cleanUsername);
+        setAuthError('');
         Alert.alert(
           'Admin Registration Submitted',
-          'Your Admin account has been registered! It is pending approval by the primary Admin before access is granted.',
-          [{
-            text: 'OK',
-            onPress: () => {
-              setIsRegistering(false);
-              setAuthPassword('');
-              setAuthConfirmPassword('');
-              setAuthError('');
-            }
-          }]
+          `Administrator account @${cleanUsername} registered successfully! It is pending authorization by the Primary Administrator. It will display "Approval Pending" until approved.`,
+          [{ text: 'OK' }]
         );
         return;
       }
@@ -622,7 +627,11 @@ function AuraWorkspace() {
       setAuthNotice('');
 
       let message = 'An unexpected error occurred. Please try again.';
-      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+      if (err.response?.data?.isPendingApproval || (err.response?.status === 403 && err.response?.data?.error?.toLowerCase().includes('pending'))) {
+        setAuthApprovalPending(true);
+        setAuthPendingAdminUser(err.response?.data?.adminUsername || cleanUsername);
+        message = err.response?.data?.error || 'Your Administrator account is pending approval by the Primary Administrator.';
+      } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
         message = 'Network timeout: The server took too long to respond. The cloud service may be waking up. Please tap again.';
       } else if (err.response?.data?.error) {
         message = err.response.data.error;
@@ -837,6 +846,7 @@ function AuraWorkspace() {
                   setIsRegistering(false);
                   setAuthError('');
                   setAuthNotice('');
+                  setAuthApprovalPending(false);
                 }}
               >
                 <Text style={{ color: !isRegistering ? '#fff' : theme.textMuted, fontWeight: 'bold' }}>
@@ -852,6 +862,7 @@ function AuraWorkspace() {
                   setIsRegistering(true);
                   setAuthError('');
                   setAuthNotice('');
+                  setAuthApprovalPending(false);
                 }}
               >
                 <Text style={{ color: isRegistering ? '#fff' : theme.textMuted, fontWeight: 'bold' }}>
@@ -859,6 +870,30 @@ function AuraWorkspace() {
                 </Text>
               </TouchableOpacity>
             </View>
+
+            {/* ADMIN APPROVAL PENDING STATUS BANNER */}
+            {authApprovalPending && !isRegistering && (
+              <View
+                style={[
+                  styles.authAlertBanner,
+                  {
+                    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7',
+                    borderColor: isDark ? '#F59E0B' : '#FCD34D'
+                  }
+                ]}
+              >
+                <Text style={{ fontSize: 20, marginRight: 8 }}>⏳</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: isDark ? '#FCD34D' : '#92400E', fontWeight: 'bold', fontSize: 13, marginBottom: 2 }}>
+                    Approval Pending Status
+                  </Text>
+                  <Text style={{ color: isDark ? '#FDE68A' : '#78350F', fontSize: 12, lineHeight: 18 }}>
+                    Your Administrator account (@{authPendingAdminUser || authUsername}) is currently awaiting authorization by the Primary Administrator.
+                    {'\n'}• Once the Primary Admin approves your account, enter your password and sign in directly.
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* INSTANT CLIENT-SIDE & SERVER ERROR BANNER */}
             {!!authError && (
@@ -929,6 +964,7 @@ function AuraWorkspace() {
               onChangeText={(t) => {
                 setAuthUsername(t);
                 if (authError) setAuthError('');
+                if (authApprovalPending) setAuthApprovalPending(false);
               }}
               editable={!authSubmitting}
             />
@@ -1049,7 +1085,9 @@ function AuraWorkspace() {
 
                     {showRegClubs && (
                       <View style={{ marginTop: 8 }}>
-                        {Object.entries(EXTRACURRICULARS).map(([catKey, clubArr]) => (
+                        {Object.entries(EXTRACURRICULARS)
+                          .filter(([catKey]) => authRole !== 'Faculty' || catKey !== 'sports')
+                          .map(([catKey, clubArr]) => (
                           <View key={catKey}>
                             <Text style={[styles.subLabel, { color: theme.accent }]}>{catKey.toUpperCase()}</Text>
                             <AccessibleChipGroup
@@ -1253,160 +1291,76 @@ function AuraWorkspace() {
             )}
 
             {user.role === 'Admin' && (
-              <>
-                {/* 1. PRIMARY ADMIN PERSPECTIVE SWITCHER (POV TESTING) */}
-                {user.isPrimaryAdmin && (
-                  <View
-                    style={[
-                      styles.formBox,
-                      {
-                        backgroundColor: theme.surfaceElevated,
-                        marginTop: 14,
-                        borderColor: theme.accent,
-                        borderWidth: 1
-                      }
-                    ]}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                      <Text style={{ fontSize: 16, marginRight: 6 }}>👑</Text>
-                      <Text style={[styles.subLabel, { color: theme.accent, fontSize: 13, marginTop: 0, marginBottom: 0 }]}>
-                        Primary Admin POV Testing & Account Switcher
+              <View
+                style={[
+                  styles.formBox,
+                  {
+                    backgroundColor: theme.surfaceElevated,
+                    marginTop: 14,
+                    borderColor: theme.accent,
+                    borderWidth: 1
+                  }
+                ]}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, marginRight: 6 }}>{user.isPrimaryAdmin ? '👑' : '🛡️'}</Text>
+                  <Text style={[styles.subLabel, { color: theme.accent, fontSize: 13, marginTop: 0, marginBottom: 0 }]}>
+                    {user.isPrimaryAdmin ? 'Primary Admin POV Testing & Persona Sandbox' : 'Administrator Persona Sandbox'}
+                  </Text>
+                </View>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 10, lineHeight: 16 }}>
+                  {user.isPrimaryAdmin
+                    ? 'You have complete POV testing privileges. Select a test persona below, or visit "10. Account Approvals" in the menu to test specific user accounts.'
+                    : 'Test the application through standardized student and faculty personas below to inspect personalized streams, filters, and department restrictions.'}
+                </Text>
+
+                <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: 'bold', marginBottom: 6 }}>
+                  ONE-TAP TEST PERSONAS:
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {[
+                    { label: '🎓 Yr 1 CSE Student', params: { presetRole: 'Student', presetDepartment: 'CSE', presetYear: 1 } },
+                    { label: '🏛️ Yr 5 ARCH Senior', params: { presetRole: 'Senior Student', presetDepartment: 'ARCH', presetYear: 5 } },
+                    { label: '📊 Yr 5 DS Senior', params: { presetRole: 'Senior Student', presetDepartment: 'DS', presetYear: 5 } },
+                    { label: '⚡ Yr 4 EEE Senior', params: { presetRole: 'Senior Student', presetDepartment: 'EEE', presetYear: 4 } },
+                    { label: '👨‍🏫 ECE Professor', params: { presetRole: 'Faculty', presetDepartment: 'ECE', presetFacultyRole: 'Professor' } },
+                    { label: '🔬 Mechanical Assistant Prof', params: { presetRole: 'Faculty', presetDepartment: 'MECH', presetFacultyRole: 'Assistant Prof' } },
+                    { label: '🛡️ Secondary Admin', params: { presetRole: 'Admin', presetDepartment: 'Administration' } }
+                  ].map((persona) => (
+                    <TouchableOpacity
+                      key={persona.label}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Switch to ${persona.label}`}
+                      style={[
+                        styles.chip,
+                        {
+                          backgroundColor: theme.card,
+                          borderColor: theme.border,
+                          paddingVertical: 6,
+                          paddingHorizontal: 10,
+                          minHeight: 34
+                        }
+                      ]}
+                      onPress={() => handleSwitchPresetPersona(persona.params)}
+                    >
+                      <Text style={{ color: theme.text, fontSize: 11, fontWeight: '600' }}>
+                        {persona.label}
                       </Text>
-                    </View>
-                    <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 10, lineHeight: 16 }}>
-                      Only you (the Main Admin) have permission to switch accounts. Test the app from any student, senior, or faculty member's point of view to verify features and refine UX.
-                    </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
-                    <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: 'bold', marginBottom: 6 }}>
-                      ONE-TAP TEST PERSONAS:
+                {user.isPrimaryAdmin && (
+                  <TouchableOpacity
+                    style={[styles.secondaryBtn, { borderColor: theme.accent, marginTop: 10, backgroundColor: theme.primarySoft }]}
+                    onPress={() => triggerTabTransition('approvals')}
+                  >
+                    <Text style={{ color: theme.accent, fontSize: 12, fontWeight: 'bold' }}>
+                      🛡️ Open Dedicated Account Approvals Tab ({adminUsers.filter(u => u.role === 'Admin' && !u.isApproved).length} Pending)
                     </Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                      {[
-                        { label: '🎓 Yr 1 CSE Student', params: { presetRole: 'Student', presetDepartment: 'CSE', presetYear: 1 } },
-                        { label: '🏛️ Yr 5 ARCH Senior', params: { presetRole: 'Senior Student', presetDepartment: 'ARCH', presetYear: 5 } },
-                        { label: '📊 Yr 5 DS Senior', params: { presetRole: 'Senior Student', presetDepartment: 'DS', presetYear: 5 } },
-                        { label: '⚡ Yr 4 EEE Senior', params: { presetRole: 'Senior Student', presetDepartment: 'EEE', presetYear: 4 } },
-                        { label: '👨‍🏫 ECE Professor', params: { presetRole: 'Faculty', presetDepartment: 'ECE', presetFacultyRole: 'Professor' } },
-                        { label: '🛡️ Secondary Admin', params: { presetRole: 'Admin', presetDepartment: 'Administration' } }
-                      ].map((persona) => (
-                        <TouchableOpacity
-                          key={persona.label}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Switch to ${persona.label}`}
-                          style={[
-                            styles.chip,
-                            {
-                              backgroundColor: theme.card,
-                              borderColor: theme.border,
-                              paddingVertical: 6,
-                              paddingHorizontal: 10,
-                              minHeight: 34
-                            }
-                          ]}
-                          onPress={() => handleSwitchPresetPersona(persona.params)}
-                        >
-                          <Text style={{ color: theme.text, fontSize: 11, fontWeight: '600' }}>
-                            {persona.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
+                  </TouchableOpacity>
                 )}
-
-                {/* 2. REGISTERED ACCOUNTS & APPROVALS QUEUE */}
-                {adminUsers.length > 0 && (
-                  <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated, marginTop: 14 }]}>
-                    <Text style={[styles.subLabel, { color: theme.accent, fontSize: 13 }]}>
-                      🛡️ {user.isPrimaryAdmin ? 'Account Approvals & User POV Directory' : 'User Directory'} ({adminUsers.length})
-                    </Text>
-                    <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 8 }}>
-                      {user.isPrimaryAdmin
-                        ? 'Approve subordinate Admin and Faculty accounts, or tap "👁️ POV" to test an exact user account.'
-                        : 'Subordinate administrator directory.'}
-                    </Text>
-                    {adminUsers.map((u) => {
-                      const isSelf = String(u._id) === String(user._id);
-                      return (
-                        <View
-                          key={u._id}
-                          style={[
-                            styles.rowBetween,
-                            {
-                              paddingVertical: 8,
-                              borderBottomWidth: 1,
-                              borderBottomColor: theme.border
-                            }
-                          ]}
-                        >
-                          <View style={{ flex: 1, marginRight: 8 }}>
-                            <Text style={{ color: theme.text, fontSize: 12, fontWeight: '700' }}>
-                              {u.name} (@{u.username}) {isSelf ? '👑 [You - Primary Admin]' : (u.isPrimaryAdmin ? '👑 [Primary Admin]' : (u.role === 'Admin' ? '🛡️ [Admin]' : ''))}
-                            </Text>
-                            <Text style={{ color: theme.textMuted, fontSize: 11 }}>
-                              Role: {u.role} {u.year ? `• Year ${u.year}` : ''} • Dept: {u.department || 'Administration'}
-                              {u.role === 'Admin' && !u.isApproved ? ' • ⚠️ [Pending Approval]' : ''}
-                            </Text>
-                          </View>
-
-                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            {!isSelf && user.isPrimaryAdmin && (
-                              <TouchableOpacity
-                                accessibilityRole="button"
-                                accessibilityLabel={`Test perspective of ${u.name}`}
-                                style={[
-                                  styles.smallBadgeBtn,
-                                  { backgroundColor: '#0284c7', marginRight: 6 }
-                                ]}
-                                onPress={() => handleSwitchAccount(u._id, u.name)}
-                              >
-                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
-                                  👁️ POV
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-
-                            {!isSelf && user.isPrimaryAdmin ? (
-                              <TouchableOpacity
-                                style={[
-                                  styles.smallBadgeBtn,
-                                  { backgroundColor: u.isApproved ? theme.success : theme.warning }
-                                ]}
-                                onPress={async () => {
-                                  try {
-                                    await axios.patch(
-                                      `${BACKEND_URL}/api/admin/users/${u._id}/approve`,
-                                      { isApproved: !u.isApproved },
-                                      apiHeader
-                                    );
-                                    fetchAllData();
-                                  } catch (err) {
-                                    Alert.alert('Approval Action Alert', err.response?.data?.error || err.message);
-                                  }
-                                }}
-                              >
-                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
-                                  {u.isApproved ? 'Approved ✓' : 'Approve ⚠️'}
-                                </Text>
-                              </TouchableOpacity>
-                            ) : isSelf ? (
-                              <View style={[styles.smallBadgeBtn, { backgroundColor: theme.primary }]}>
-                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>Active Admin</Text>
-                              </View>
-                            ) : (
-                              <View style={[styles.smallBadgeBtn, { backgroundColor: u.isApproved ? theme.success : theme.warning }]}>
-                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
-                                  {u.isApproved ? 'Approved' : 'Pending'}
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-              </>
+              </View>
             )}
           </View>
         );
@@ -2118,9 +2072,11 @@ function AuraWorkspace() {
                 )}
 
                 <Text style={[styles.subLabel, { color: theme.accent, marginTop: 14 }]}>
-                  Update Extracurricular Club Memberships
+                  Update Extracurricular Club Memberships {editRole === 'Faculty' ? '(Sports Restricted for Faculty)' : ''}
                 </Text>
-                {Object.entries(EXTRACURRICULARS).map(([catKey, clubList]) => {
+                {Object.entries(EXTRACURRICULARS)
+                  .filter(([catKey]) => editRole !== 'Faculty' || catKey !== 'sports')
+                  .map(([catKey, clubList]) => {
                   const filteredClubs = clubList.filter(
                     (c) => !localSearch.profile || c.toLowerCase().includes(localSearch.profile.toLowerCase())
                   );
@@ -2186,6 +2142,271 @@ function AuraWorkspace() {
                 🔄 Check for Over-The-Air (OTA) Updates
               </Text>
             </TouchableOpacity>
+          </View>
+        );
+      }
+
+      case 'approvals': {
+        if (!user.isPrimaryAdmin) {
+          return (
+            <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={[styles.sectionHeader, { color: theme.danger }]}>🛡️ Access Restricted</Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 13, marginTop: 8 }}>
+                Only the designated Primary Administrator is authorized to view and manage account approvals.
+              </Text>
+            </View>
+          );
+        }
+
+        const pendingAdmins = adminUsers.filter((u) => u.role === 'Admin' && !u.isApproved);
+        const filteredUsers = adminUsers.filter((u) => {
+          if (!localSearch.approvals) return true;
+          const q = localSearch.approvals.toLowerCase();
+          return (
+            (u.name || '').toLowerCase().includes(q) ||
+            (u.username || '').toLowerCase().includes(q) ||
+            (u.role || '').toLowerCase().includes(q) ||
+            (u.department || '').toLowerCase().includes(q)
+          );
+        });
+
+        return (
+          <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+              <Text style={{ fontSize: 24, marginRight: 8 }}>🛡️</Text>
+              <View>
+                <Text style={[styles.sectionHeader, { color: theme.text, marginBottom: 0 }]}>
+                  10. Account Approvals & Administration
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                  Primary Admin Command Center • Authorize secondary admins & manage accounts
+                </Text>
+              </View>
+            </View>
+
+            <View
+              style={{
+                backgroundColor: 'rgba(217, 119, 6, 0.12)',
+                borderColor: '#d97706',
+                borderWidth: 1,
+                borderRadius: 10,
+                padding: 12,
+                marginVertical: 12
+              }}
+            >
+              <Text style={{ color: '#d97706', fontWeight: 'bold', fontSize: 13 }}>
+                👑 Verified Primary Administrator: @{user.username}
+              </Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 3, lineHeight: 16 }}>
+                You alone have sole authority to authorize new Admin accounts, reject unapproved registrations, and switch into any user's POV.
+              </Text>
+            </View>
+
+            {/* PENDING ADMIN APPROVALS QUEUE */}
+            <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated, marginBottom: 16 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={[styles.subLabel, { color: theme.accent, fontSize: 13, marginTop: 0, marginBottom: 0 }]}>
+                  ⏳ Pending Administrator Approvals ({pendingAdmins.length})
+                </Text>
+                {pendingAdmins.length > 0 && (
+                  <View style={{ backgroundColor: '#fef3c7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 }}>
+                    <Text style={{ color: '#b45309', fontSize: 11, fontWeight: 'bold' }}>Action Required</Text>
+                  </View>
+                )}
+              </View>
+
+              {pendingAdmins.length === 0 ? (
+                <Text style={{ color: theme.textMuted, fontSize: 12, paddingVertical: 8, fontStyle: 'italic' }}>
+                  ✓ No pending approvals. All registered administrators are currently approved.
+                </Text>
+              ) : (
+                pendingAdmins.map((pAdmin) => (
+                  <View
+                    key={pAdmin._id}
+                    style={{
+                      backgroundColor: theme.card,
+                      borderColor: '#f59e0b',
+                      borderWidth: 1,
+                      borderRadius: 10,
+                      padding: 12,
+                      marginBottom: 10
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <Text style={{ color: theme.text, fontWeight: 'bold', fontSize: 13 }}>
+                        {pAdmin.name} (@{pAdmin.username})
+                      </Text>
+                      <View style={{ backgroundColor: '#fef3c7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                        <Text style={{ color: '#92400e', fontSize: 10, fontWeight: 'bold' }}>Pending Approval</Text>
+                      </View>
+                    </View>
+                    <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 10 }}>
+                      Registered: {new Date(pAdmin.createdAt).toLocaleString()} • Dept: {pAdmin.department || 'Administration'}
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        style={[styles.smallBadgeBtn, { backgroundColor: theme.success, flex: 1, minHeight: 38 }]}
+                        onPress={async () => {
+                          try {
+                            await axios.patch(
+                              `${BACKEND_URL}/api/admin/users/${pAdmin._id}/approve`,
+                              { isApproved: true },
+                              apiHeader
+                            );
+                            fetchAllData();
+                            Alert.alert('Approved', `Admin account @${pAdmin.username} is now approved and can sign in!`);
+                          } catch (err) {
+                            Alert.alert('Error', err.response?.data?.error || err.message);
+                          }
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>
+                          ✅ Approve Administrator
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        style={[styles.smallBadgeBtn, { backgroundColor: theme.danger, flex: 1, minHeight: 38 }]}
+                        onPress={async () => {
+                          try {
+                            await axios.delete(
+                              `${BACKEND_URL}/api/admin/users/${pAdmin._id}`,
+                              apiHeader
+                            );
+                            fetchAllData();
+                            Alert.alert('Rejected', `Admin registration @${pAdmin.username} was rejected and deleted.`);
+                          } catch (err) {
+                            Alert.alert('Error', err.response?.data?.error || err.message);
+                          }
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>
+                          ❌ Reject & Delete
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+
+            {/* ALL SYSTEM ACCOUNTS & FULL POV TESTING DIRECTORY */}
+            <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated }]}>
+              <Text style={[styles.subLabel, { color: theme.accent, fontSize: 13, marginBottom: 4 }]}>
+                👥 All System Accounts & User POV Directory ({adminUsers.length})
+              </Text>
+              <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 10 }}>
+                As Primary Admin, tap "👁️ POV Test" on any account below to inspect the app directly through their exact perspective.
+              </Text>
+
+              <LocalizedSearchBar
+                sectionLabel="Search Accounts"
+                value={localSearch.approvals}
+                onChange={(v) => updateLocalSearch('approvals', v)}
+              />
+
+              {filteredUsers.length === 0 ? (
+                <Text style={{ color: theme.textMuted, fontSize: 12, paddingVertical: 8, fontStyle: 'italic' }}>
+                  No accounts found matching search.
+                </Text>
+              ) : (
+                filteredUsers.map((u) => {
+                  const isSelf = String(u._id) === String(user._id);
+                  return (
+                    <View
+                      key={u._id}
+                      style={[
+                        styles.rowBetween,
+                        {
+                          paddingVertical: 10,
+                          borderBottomWidth: 1,
+                          borderBottomColor: theme.border
+                        }
+                      ]}
+                    >
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={{ color: theme.text, fontSize: 12, fontWeight: '700' }}>
+                          {u.name} (@{u.username}) {isSelf ? '👑 [You - Primary Admin]' : (u.isPrimaryAdmin ? '👑 [Primary Admin]' : (u.role === 'Admin' ? '🛡️ [Admin]' : ''))}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                          Role: {u.role} {u.year ? `• Year ${u.year}` : ''} • Dept: {u.department || 'Administration'}
+                          {u.role === 'Admin' && !u.isApproved ? ' • ⚠️ [Pending Approval]' : ''}
+                        </Text>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {!isSelf && (
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`Test perspective of ${u.name}`}
+                            style={[styles.smallBadgeBtn, { backgroundColor: '#0284c7' }]}
+                            onPress={() => handleSwitchAccount(u._id, u.name)}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>👁️ POV Test</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {!isSelf && u.role === 'Admin' && (
+                          <TouchableOpacity
+                            style={[
+                              styles.smallBadgeBtn,
+                              { backgroundColor: u.isApproved ? theme.warning : theme.success }
+                            ]}
+                            onPress={async () => {
+                              try {
+                                await axios.patch(
+                                  `${BACKEND_URL}/api/admin/users/${u._id}/approve`,
+                                  { isApproved: !u.isApproved },
+                                  apiHeader
+                                );
+                                fetchAllData();
+                              } catch (err) {
+                                Alert.alert('Approval Error', err.response?.data?.error || err.message);
+                              }
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
+                              {u.isApproved ? 'Revoke' : 'Approve'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {!isSelf && (
+                          <TouchableOpacity
+                            style={[styles.smallBadgeBtn, { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: theme.danger }]}
+                            onPress={() => {
+                              Alert.alert(
+                                'Delete User',
+                                `Are you sure you want to delete @${u.username}?`,
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  {
+                                    text: 'Delete',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                      try {
+                                        await axios.delete(`${BACKEND_URL}/api/admin/users/${u._id}`, apiHeader);
+                                        fetchAllData();
+                                        Alert.alert('Deleted', `Account @${u.username} removed.`);
+                                      } catch (err) {
+                                        Alert.alert('Error', err.response?.data?.error || err.message);
+                                      }
+                                    }
+                                  }
+                                ]
+                              );
+                            }}
+                          >
+                            <Text style={{ color: theme.danger, fontSize: 11, fontWeight: 'bold' }}>Delete</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </View>
           </View>
         );
       }
