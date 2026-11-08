@@ -317,6 +317,20 @@ function AuraWorkspace() {
         setLoadingSession(false);
       }
     })();
+
+    // Automatic silent OTA update check on launch
+    (async () => {
+      if (__DEV__) return;
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch (e) {
+        console.log('Auto OTA update error:', e.message);
+      }
+    })();
   }, []);
 
   const syncProfileState = (u) => {
@@ -1081,6 +1095,17 @@ function AuraWorkspace() {
                   {isRegistering ? 'Complete Registration' : 'Enter AURA Workspace'}
                 </Text>
               )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Check for over-the-air updates"
+              onPress={handleCheckForUpdates}
+              style={{ marginTop: 14, alignSelf: 'center', padding: 8 }}
+            >
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '500' }}>
+                🔄 Check for Updates (v2.0.0)
+              </Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
