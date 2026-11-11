@@ -43,3 +43,7 @@ yarn-error.*
 # build binaries
 *.apk
 *.aab
+
+# presentation files (do not commit)
+*.pptx
+*.ppt
