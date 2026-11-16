@@ -41,7 +41,10 @@ import {
   getOrderedTabs,
   BUG_CATEGORIES,
   BUG_SEVERITIES,
-  JOB_TYPES
+  JOB_TYPES,
+  UPLOAD_TOPIC_PRESETS,
+  GUIDE_TOPIC_PRESETS,
+  QNA_CLUB_CATEGORIES
 } from './src/constants/auraData';
 import { ThemeProvider, useAuraTheme } from './src/theme/ThemeContext';
 import AdaptiveNavigation from './src/components/AdaptiveNavigation';
@@ -104,35 +107,87 @@ function AccessibleChipGroup({ options, selected, onSelect, multi = false, rende
   );
 }
 
-// --- INDEPENDENT LOCALIZED SEARCH BAR PER VIEW ---
+// --- COLLAPSIBLE LOCALIZED SEARCH BAR PER VIEW ---
 function LocalizedSearchBar({ sectionLabel, value, onChange }) {
   const { theme } = useAuraTheme();
+  const [isExpanded, setIsExpanded] = useState(Boolean(value));
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (value && !isExpanded) {
+      setIsExpanded(true);
+    }
+  }, [value]);
+
+  const handleToggle = () => {
+    if (isExpanded && !value) {
+      setIsExpanded(false);
+    } else if (!isExpanded) {
+      setIsExpanded(true);
+      setTimeout(() => inputRef.current?.focus(), 80);
+    }
+  };
+
+  const handleClear = () => {
+    onChange('');
+    setIsExpanded(false);
+  };
+
+  if (!isExpanded) {
+    return (
+      <View style={{ marginBottom: 10, alignItems: 'flex-start' }}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`Open search for ${sectionLabel}`}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingVertical: 6,
+            paddingHorizontal: 12,
+            borderRadius: 18,
+            borderWidth: 1,
+            backgroundColor: theme.card,
+            borderColor: theme.border
+          }}
+          onPress={handleToggle}
+        >
+          <Text style={{ fontSize: 13, marginRight: 6 }}>🔍</Text>
+          <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '500' }}>
+            Search in {sectionLabel}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View
       style={[
         styles.localSearchBox,
-        { backgroundColor: theme.card, borderColor: theme.border }
+        { backgroundColor: theme.card, borderColor: theme.accent, marginBottom: 10 }
       ]}
     >
-      <Text style={{ marginRight: 8, fontSize: 15 }}>🔍</Text>
+      <TouchableOpacity onPress={handleToggle} style={{ marginRight: 6 }}>
+        <Text style={{ fontSize: 14 }}>🔍</Text>
+      </TouchableOpacity>
       <TextInput
+        ref={inputRef}
+        autoFocus
         accessibilityLabel={`Search within ${sectionLabel}`}
         style={[styles.localSearchInput, { color: theme.text }]}
-        placeholder={`Search inside ${sectionLabel} only...`}
+        placeholder={`Search inside ${sectionLabel}...`}
         placeholderTextColor={theme.textMuted}
         value={value}
         onChangeText={onChange}
       />
-      {value ? (
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Clear local search"
-          style={styles.clearSearchBtn}
-          onPress={() => onChange('')}
-        >
-          <Text style={{ color: theme.textMuted, fontWeight: 'bold' }}>✕</Text>
-        </TouchableOpacity>
-      ) : null}
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Close search"
+        style={styles.clearSearchBtn}
+        onPress={handleClear}
+      >
+        <Text style={{ color: theme.textMuted, fontWeight: 'bold', fontSize: 13 }}>✕</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -286,23 +341,32 @@ function AuraWorkspace() {
   // --- IN-APP PDF READER MODAL ---
   const [pdfModal, setPdfModal] = useState({ visible: false, url: '', title: '' });
 
-  // --- TAB 3: Q&A FORM ---
+  // --- TAB 2: ADMIN ACADEMIC LIBRARY FILTER ---
+  const [adminLibraryDept, setAdminLibraryDept] = useState('All Departments');
+
+  // --- TAB 3: Q&A FORM & CLUB INTEGRATION ---
   const [newQuestion, setNewQuestion] = useState('');
   const [newQuestionDept, setNewQuestionDept] = useState('All');
+  const [newQClubCategory, setNewQClubCategory] = useState(null);
+  const [newQClubName, setNewQClubName] = useState(null);
+  const [qaClubCategoryFilter, setQaClubCategoryFilter] = useState('All');
+  const [qaClubNameFilter, setQaClubNameFilter] = useState('All');
   const [answerInputs, setAnswerInputs] = useState({});
 
-  // --- TAB 4: GUIDES FORM ---
+  // --- TAB 4: GUIDES FORM & EXPANDED TAGS ---
   const [guideTitle, setGuideTitle] = useState('');
   const [guideCategory, setGuideCategory] = useState('Placement Tip');
   const [guideDept, setGuideDept] = useState('All');
   const [guideContent, setGuideContent] = useState('');
+  const [guideSelectedTopics, setGuideSelectedTopics] = useState([]);
+  const [guideTopicFilter, setGuideTopicFilter] = useState('All');
 
   // --- TAB 5: ASK LAURA AI ---
   const [lauraQuery, setLauraQuery] = useState('');
   const [lauraResponse, setLauraResponse] = useState(null);
   const [lauraLoading, setLauraLoading] = useState(false);
 
-  // --- TAB 6: UPLOAD HUB ---
+  // --- TAB 6: UPLOAD HUB & ENHANCED AI TAGGING ---
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadCourse, setUploadCourse] = useState('');
   const [uploadSemester, setUploadSemester] = useState('');
@@ -310,8 +374,19 @@ function AuraWorkspace() {
   const [uploadDept, setUploadDept] = useState('All');
   const [uploadYear, setUploadYear] = useState('All Years');
   const [uploadSummary, setUploadSummary] = useState('');
+  const [uploadSelectedTopics, setUploadSelectedTopics] = useState(['Exam Prep']);
+  const [customTopicInput, setCustomTopicInput] = useState('');
   const [uploadedPdfUrl, setUploadedPdfUrl] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [isAiAutoTaggingResource, setIsAiAutoTaggingResource] = useState(false);
+
+  // --- TAB 10: PRIMARY ADMIN COHORT PROMOTION & GAMIFICATION ---
+  const [approvalsSubTab, setApprovalsSubTab] = useState('admins'); // 'admins' | 'promotion'
+  const [cohortStats, setCohortStats] = useState(null);
+  const [promotingCohort, setPromotingCohort] = useState(null);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [leaderboardDeptFilter, setLeaderboardDeptFilter] = useState('All');
+  const [currentUserPUPMeta, setCurrentUserPUPMeta] = useState(null);
 
   // --- TAB 8: MULTI-TARGET NOTIFICATION ARRAYS ---
   const [noteTitle, setNoteTitle] = useState('');
@@ -430,13 +505,14 @@ function AuraWorkspace() {
 
   const fetchAllData = async () => {
     try {
-      const [resList, qaList, guideList, noteList, statsRes, jobsRes] = await Promise.all([
+      const [resList, qaList, guideList, noteList, statsRes, jobsRes, lbRes] = await Promise.all([
         axios.get(`${BACKEND_URL}/api/resources`, apiHeader),
         axios.get(`${BACKEND_URL}/api/qa`, apiHeader),
         axios.get(`${BACKEND_URL}/api/guides`, apiHeader),
         axios.get(`${BACKEND_URL}/api/notifications`, apiHeader),
         axios.get(`${BACKEND_URL}/api/profile/stats`, apiHeader),
-        axios.get(`${BACKEND_URL}/api/jobs`, apiHeader).catch(() => ({ data: { jobs: [] } }))
+        axios.get(`${BACKEND_URL}/api/jobs`, apiHeader).catch(() => ({ data: { jobs: [] } })),
+        axios.get(`${BACKEND_URL}/api/leaderboard`, apiHeader).catch(() => ({ data: { leaderboard: [] } }))
       ]);
       setResources(resList.data);
       setQuestions(qaList.data);
@@ -444,23 +520,149 @@ function AuraWorkspace() {
       setNotifications(noteList.data);
       setProfileStats(statsRes.data);
       if (jobsRes.data) setJobsData(jobsRes.data);
+      if (lbRes.data?.leaderboard) setLeaderboard(lbRes.data.leaderboard);
+      if (lbRes.data?.currentUser) setCurrentUserPUPMeta(lbRes.data.currentUser);
       syncIncomingNotifications(noteList.data);
 
       if (user?.role === 'Admin') {
-        const [usersRes, ticketsRes, inchargesRes] = await Promise.all([
+        const [usersRes, ticketsRes, inchargesRes, cohortRes] = await Promise.all([
           axios.get(`${BACKEND_URL}/api/admin/users`, apiHeader).catch(() => ({ data: { users: [] } })),
           axios.get(`${BACKEND_URL}/api/support/tickets`, apiHeader).catch(() => ({ data: [] })),
-          axios.get(`${BACKEND_URL}/api/admin/placement-incharges`, apiHeader).catch(() => ({ data: { incharges: [] } }))
+          axios.get(`${BACKEND_URL}/api/admin/placement-incharges`, apiHeader).catch(() => ({ data: { incharges: [] } })),
+          user?.isPrimaryAdmin
+            ? axios.get(`${BACKEND_URL}/api/admin/cohort-stats`, apiHeader).catch(() => ({ data: null }))
+            : Promise.resolve({ data: null })
         ]);
         setAdminUsers(usersRes.data.users || usersRes.data);
         if (ticketsRes.data) setSupportTickets(ticketsRes.data);
         if (inchargesRes.data) setPlacementIncharges(inchargesRes.data.incharges || []);
+        if (cohortRes.data) setCohortStats(cohortRes.data);
       }
     } catch (err) {
       console.log('Sync error:', err.message);
       if (err.response?.status === 401) {
         handleLogout();
       }
+    }
+  };
+
+  const fetchCohortStats = async () => {
+    try {
+      const res = await axios.get(`${BACKEND_URL}/api/admin/cohort-stats`, apiHeader);
+      if (res.data) setCohortStats(res.data);
+    } catch (e) {
+      console.log('Error fetching cohort stats:', e.message);
+    }
+  };
+
+  const handlePromoteCohort = async (cohortNum) => {
+    const cohortDescriptions = {
+      1: 'Promote all 1st-Year students to 2nd Year?',
+      2: 'Promote all 2nd-Year students to 3rd Year and auto-upgrade role to "Senior Student"?',
+      3: 'Promote all 3rd-Year students to 4th Year?',
+      4: 'Process 4th-Year cohort? (ARCH & DS advance to 5th Year; all other 4-year degree students graduate to Alumni)',
+      5: 'Graduate all 5th-Year ARCH & DS students to Alumni status?'
+    };
+
+    Alert.alert(
+      'Confirm Academic Year Promotion',
+      cohortDescriptions[cohortNum] || `Promote Cohort ${cohortNum}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm & Promote',
+          style: 'destructive',
+          onPress: async () => {
+            setPromotingCohort(cohortNum);
+            try {
+              const res = await axios.post(
+                `${BACKEND_URL}/api/admin/promote-cohort`,
+                { cohort: cohortNum },
+                apiHeader
+              );
+              Alert.alert('Promotion Complete', res.data.message);
+              fetchCohortStats();
+              fetchAllData();
+            } catch (err) {
+              Alert.alert('Promotion Error', err.response?.data?.error || err.message);
+            } finally {
+              setPromotingCohort(null);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleUpvoteAnswer = async (qId, ansId) => {
+    try {
+      const res = await axios.post(
+        `${BACKEND_URL}/api/qa/${qId}/answers/${ansId}/upvote`,
+        {},
+        apiHeader
+      );
+      if (res.data?.success) {
+        fetchAllData();
+      }
+    } catch (err) {
+      Alert.alert('Upvote', err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleAcceptAnswer = async (qId, ansId) => {
+    try {
+      const res = await axios.post(
+        `${BACKEND_URL}/api/qa/${qId}/answers/${ansId}/accept`,
+        {},
+        apiHeader
+      );
+      if (res.data?.success) {
+        Alert.alert('Accepted Solution!', 'Answer marked as Accepted. Responder awarded +50 Plus Ultra Points!');
+        fetchAllData();
+      }
+    } catch (err) {
+      Alert.alert('Accept Answer', err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleAiAutoTagResource = async () => {
+    if (!uploadTitle && !uploadCourse && !uploadSummary) {
+      return Alert.alert('Auto-Tag with AI', 'Please enter a title, course, or summary to auto-tag.');
+    }
+    setIsAiAutoTaggingResource(true);
+    try {
+      const res = await axios.post(
+        `${BACKEND_URL}/api/resources/ai-autotag`,
+        { title: uploadTitle, description: uploadCourse, summary: uploadSummary },
+        apiHeader
+      );
+      if (res.data) {
+        if (res.data.department && res.data.department !== 'General') {
+          setUploadDept(res.data.department);
+        }
+        if (res.data.semester) {
+          let sem = res.data.semester;
+          if (!FIFTH_YEAR_DEPTS.includes(res.data.department || uploadDept) && ['Sem 9', 'Sem 10'].includes(sem)) {
+            sem = 'Sem 8';
+          }
+          setUploadSemester(sem);
+        }
+        if (res.data.resourceType) setUploadType(res.data.resourceType);
+        if (res.data.targetYear !== undefined) {
+          setUploadYear(res.data.targetYear === 0 ? 'All Years' : res.data.targetYear);
+        }
+        if (res.data.suggestedTopics && res.data.suggestedTopics.length > 0) {
+          setUploadSelectedTopics(res.data.suggestedTopics);
+        }
+        if (!uploadSummary && res.data.aiSummary) {
+          setUploadSummary(res.data.aiSummary);
+        }
+        Alert.alert('AI Auto-Tag Complete', 'Document Type, Semester, Department, and Topic tags updated!');
+      }
+    } catch (err) {
+      Alert.alert('Auto-Tag Error', err.response?.data?.error || err.message);
+    } finally {
+      setIsAiAutoTaggingResource(false);
     }
   };
 
@@ -765,16 +967,26 @@ function AuraWorkspace() {
       });
 
       setUploadedPdfUrl(res.data.pdfUrl);
-      if (!uploadTitle) setUploadTitle(res.data.detectedMeta.suggestedTitle);
-      setUploadType(res.data.detectedMeta.resourceType);
-      let detectedSem = res.data.detectedMeta.semester;
-      if (!FIFTH_YEAR_DEPTS.includes(uploadDept) && ['Sem 9', 'Sem 10'].includes(detectedSem)) {
-        detectedSem = 'Sem 8';
+      if (res.data.detectedMeta) {
+        const meta = res.data.detectedMeta;
+        if (!uploadTitle && meta.suggestedTitle) setUploadTitle(meta.suggestedTitle);
+        if (meta.resourceType) setUploadType(meta.resourceType);
+        if (meta.department && meta.department !== 'General') setUploadDept(meta.department);
+        let detectedSem = meta.semester;
+        if (!FIFTH_YEAR_DEPTS.includes(meta.department || uploadDept) && ['Sem 9', 'Sem 10'].includes(detectedSem)) {
+          detectedSem = 'Sem 8';
+        }
+        if (detectedSem) setUploadSemester(detectedSem);
+        if (meta.targetYear !== undefined) {
+          setUploadYear(meta.targetYear === 0 ? 'All Years' : meta.targetYear);
+        }
+        if (meta.suggestedTopics && meta.suggestedTopics.length > 0) {
+          setUploadSelectedTopics(meta.suggestedTopics);
+        }
+        if (meta.aiSummary) setUploadSummary(meta.aiSummary);
       }
-      setUploadSemester(detectedSem);
-      setUploadSummary(res.data.detectedMeta.aiSummary);
 
-      Alert.alert('Uploadthing Complete', 'Secure PDF URL received and AI tags detected!');
+      Alert.alert('Uploadthing Complete', 'Secure PDF URL received and AI tags auto-detected!');
     } catch (err) {
       Alert.alert('Upload Error', err.response?.data?.error || err.message);
     } finally {
@@ -810,6 +1022,7 @@ function AuraWorkspace() {
           department: uploadDept,
           targetYear: finalYear,
           summary: uploadSummary,
+          tags: [...uploadSelectedTopics, uploadType, uploadDept, finalSemester].filter(Boolean),
           pdfUrl: uploadedPdfUrl
         },
         apiHeader
@@ -818,8 +1031,9 @@ function AuraWorkspace() {
       setUploadCourse('');
       setUploadSummary('');
       setUploadedPdfUrl('');
+      setUploadSelectedTopics(['Exam Prep']);
       fetchAllData();
-      Alert.alert('Archived!', 'Resource saved to MongoDB Atlas.');
+      Alert.alert('Archived!', 'Resource saved to MongoDB Atlas with multi-select tags.');
     } catch (err) {
       Alert.alert('Save Error', err.response?.data?.error || err.message);
     }
@@ -1491,10 +1705,21 @@ function AuraWorkspace() {
   });
 
   const libraryResources = resources.filter((r) => {
-    const allowedDept =
-      r.department === user.department || r.department === 'All' || r.department === 'General';
+    let allowedDept = false;
+    if (user?.role === 'Admin') {
+      if (adminLibraryDept === 'All Departments') {
+        allowedDept = true;
+      } else if (adminLibraryDept === 'General') {
+        allowedDept = r.department === 'General' || r.department === 'All';
+      } else {
+        allowedDept = r.department === adminLibraryDept || r.department === 'All';
+      }
+    } else {
+      allowedDept =
+        r.department === user.department || r.department === 'All' || r.department === 'General';
+    }
     const q = localSearch.library.toLowerCase();
-    return allowedDept && (!q || `${r.title} ${r.course} ${r.semester || ''} ${r.resourceType}`.toLowerCase().includes(q));
+    return allowedDept && (!q || `${r.title} ${r.course} ${r.semester || ''} ${r.resourceType} ${r.department} ${r.tags?.join(' ') || ''}`.toLowerCase().includes(q));
   });
 
   const trizGroupedLibrary = {};
@@ -1507,12 +1732,17 @@ function AuraWorkspace() {
 
   const filteredQA = questions.filter((qItem) => {
     const q = localSearch.qa.toLowerCase();
-    return !q || `${qItem.question} ${qItem.askerName} ${qItem.department}`.toLowerCase().includes(q);
+    const matchesSearch = !q || `${qItem.question} ${qItem.askerName} ${qItem.department} ${qItem.clubCategory || ''} ${qItem.clubName || ''}`.toLowerCase().includes(q);
+    const matchesCategory = qaClubCategoryFilter === 'All' || qItem.clubCategory === qaClubCategoryFilter;
+    const matchesClub = qaClubNameFilter === 'All' || qItem.clubName === qaClubNameFilter;
+    return matchesSearch && matchesCategory && matchesClub;
   });
 
   const filteredGuides = guides.filter((g) => {
     const q = localSearch.guides.toLowerCase();
-    return !q || `${g.title} ${g.category} ${g.content} ${g.authorName}`.toLowerCase().includes(q);
+    const matchesSearch = !q || `${g.title} ${g.category} ${g.content} ${g.authorName} ${g.topics?.join(' ') || ''}`.toLowerCase().includes(q);
+    const matchesTopic = guideTopicFilter === 'All' || (g.topics && g.topics.includes(guideTopicFilter));
+    return matchesSearch && matchesTopic;
   });
 
   const globalQuery = localSearch.search.toLowerCase().trim();
@@ -1617,6 +1847,124 @@ function AuraWorkspace() {
               smartFeedResources.map(renderResourceCard)
             )}
 
+            {/* PLUS ULTRA LEADERBOARD & TOP MENTORS */}
+            <View
+              style={[
+                styles.formBox,
+                {
+                  backgroundColor: theme.surfaceElevated,
+                  marginTop: 14,
+                  borderColor: '#f59e0b',
+                  borderWidth: 1
+                }
+              ]}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 18, marginRight: 6 }}>🏆</Text>
+                  <Text style={[styles.subLabel, { color: '#f59e0b', fontSize: 13, marginTop: 0, marginBottom: 0, fontWeight: 'bold' }]}>
+                    Plus Ultra Top Mentors & Contributors
+                  </Text>
+                </View>
+                {currentUserPUPMeta && (
+                  <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
+                    <Text style={{ color: '#d97706', fontSize: 11, fontWeight: 'bold' }}>
+                      Your PUP: ⚡ {currentUserPUPMeta.points || user.plusUltraPoints || 0}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 10 }}>
+                Earn Plus Ultra Points (PUP) by answering Q&A queries, receiving upvotes, and uploading verified guides!
+              </Text>
+
+              {/* Department Filter Chips for Leaderboard */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginBottom: 10 }}>
+                {['All', ...PROFILE_DEPARTMENTS].map((dept) => {
+                  const isSel = leaderboardDeptFilter === dept;
+                  return (
+                    <TouchableOpacity
+                      key={dept}
+                      style={{
+                        paddingVertical: 4,
+                        paddingHorizontal: 10,
+                        borderRadius: 14,
+                        backgroundColor: isSel ? '#f59e0b' : theme.card,
+                        borderWidth: 1,
+                        borderColor: isSel ? '#f59e0b' : theme.border
+                      }}
+                      onPress={async () => {
+                        setLeaderboardDeptFilter(dept);
+                        try {
+                          const query = dept === 'All' ? '' : `?department=${encodeURIComponent(dept)}`;
+                          const res = await axios.get(`${BACKEND_URL}/api/leaderboard${query}`, apiHeader);
+                          if (res.data?.leaderboard) setLeaderboard(res.data.leaderboard);
+                        } catch (e) {
+                          console.log('Leaderboard filter error:', e);
+                        }
+                      }}
+                    >
+                      <Text style={{ color: isSel ? '#fff' : theme.text, fontSize: 11, fontWeight: isSel ? '700' : '500' }}>
+                        {dept}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {leaderboard.length === 0 ? (
+                <Text style={{ color: theme.textMuted, fontSize: 11, fontStyle: 'italic', paddingVertical: 6 }}>
+                  No ranked mentors in this department yet. Be the first to earn Plus Ultra Points!
+                </Text>
+              ) : (
+                leaderboard.slice(0, 5).map((m, idx) => (
+                  <View
+                    key={m._id || idx}
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: theme.card,
+                      padding: 10,
+                      borderRadius: 8,
+                      marginBottom: 6,
+                      borderWidth: 1,
+                      borderColor: idx === 0 ? '#f59e0b' : theme.border
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 8 }}>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', width: 24, color: idx === 0 ? '#f59e0b' : idx === 1 ? '#94a3b8' : idx === 2 ? '#b45309' : theme.textMuted }}>
+                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                      </Text>
+                      <View>
+                        <Text style={{ color: theme.text, fontSize: 12, fontWeight: 'bold' }}>
+                          {m.name}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 10 }}>
+                          {m.department || 'Campus'}{m.year ? ` • Yr ${m.year}` : ''} • {m.role}
+                        </Text>
+                        {m.badges && m.badges.length > 0 && (
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                            {m.badges.slice(0, 2).map((b) => (
+                              <View key={b} style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                                <Text style={{ color: '#d97706', fontSize: 9, fontWeight: 'bold' }}>★ {b}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={{ color: '#f59e0b', fontWeight: 'bold', fontSize: 13 }}>
+                        ⚡ {m.plusUltraPoints || 0}
+                      </Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 9 }}>PUP</Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+
             {user.role === 'Admin' && (
               <View
                 style={[
@@ -1697,13 +2045,47 @@ function AuraWorkspace() {
           <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text style={[styles.sectionHeader, { color: theme.text }]}>📚 2. Academic Library</Text>
             <Text style={[styles.sectionSub, { color: theme.textMuted }]}>
-              Multi-level TRIZ Dimension hierarchy (Course ▸ Semester ▸ Type) for {user.department} + All.
+              {user.role === 'Admin'
+                ? 'Full Cross-Department Vault with Administrator Deep Triage & Inspection.'
+                : `Multi-level TRIZ Dimension hierarchy (Course ▸ Semester ▸ Type) for ${user.department} + All.`}
             </Text>
             <LocalizedSearchBar
               sectionLabel="Academic Library"
               value={localSearch.library}
               onChange={(v) => updateLocalSearch('library', v)}
             />
+
+            {user?.role === 'Admin' && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: theme.accent, marginBottom: 6 }}>
+                  🏛️ Admin Department Filter ({libraryResources.length} Documents):
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 2 }}>
+                  {['All Departments', 'General', ...PROFILE_DEPARTMENTS].map((dept) => {
+                    const isSel = adminLibraryDept === dept;
+                    return (
+                      <TouchableOpacity
+                        key={dept}
+                        style={{
+                          paddingVertical: 5,
+                          paddingHorizontal: 12,
+                          borderRadius: 16,
+                          backgroundColor: isSel ? theme.primary : theme.card,
+                          borderColor: isSel ? theme.primary : theme.border,
+                          borderWidth: 1
+                        }}
+                        onPress={() => setAdminLibraryDept(dept)}
+                      >
+                        <Text style={{ color: isSel ? '#fff' : theme.text, fontSize: 11, fontWeight: isSel ? '700' : '500' }}>
+                          {dept}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
             {Object.keys(trizGroupedLibrary).length === 0 ? (
               <Text style={{ color: theme.textMuted }}>No matching documents in library.</Text>
             ) : (
@@ -1724,36 +2106,168 @@ function AuraWorkspace() {
           <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text style={[styles.sectionHeader, { color: theme.text }]}>💬 3. Q&A Board</Text>
             <Text style={[styles.sectionSub, { color: theme.textMuted }]}>
-              Decentralized peer-to-peer academic discussion forum.
+              Decentralized peer-to-peer academic and club forum. Earn +10 PUP per upvote and +50 PUP for accepted answers!
             </Text>
             <LocalizedSearchBar
               sectionLabel="Q&A Board"
               value={localSearch.qa}
               onChange={(v) => updateLocalSearch('qa', v)}
             />
+
+            {/* Club Category Filter Bar */}
+            <View style={{ marginBottom: 10 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.accent, marginBottom: 4 }}>
+                🏷️ Filter by Extracurricular Club Category:
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {['All', 'Tech', 'Non-Tech', 'Sports', 'Cultural', 'Volunteering'].map((cat) => {
+                  const isSel = qaClubCategoryFilter === cat;
+                  return (
+                    <TouchableOpacity
+                      key={cat}
+                      style={{
+                        paddingVertical: 4,
+                        paddingHorizontal: 10,
+                        borderRadius: 14,
+                        backgroundColor: isSel ? theme.primary : theme.card,
+                        borderColor: isSel ? theme.primary : theme.border,
+                        borderWidth: 1
+                      }}
+                      onPress={() => {
+                        setQaClubCategoryFilter(cat);
+                        setQaClubNameFilter('All');
+                      }}
+                    >
+                      <Text style={{ color: isSel ? '#fff' : theme.text, fontSize: 11, fontWeight: isSel ? '700' : '500' }}>
+                        {cat === 'All' ? '🌐 All Clubs & Academic' : cat}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Sub-Filter for specific clubs if a club category is active */}
+            {qaClubCategoryFilter !== 'All' && (
+              <View style={{ marginBottom: 12 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {['All', ...(EXTRACURRICULARS[qaClubCategoryFilter === 'Non-Tech' ? 'nonTech' : qaClubCategoryFilter.toLowerCase()] || [])].map((cl) => {
+                    const isSel = qaClubNameFilter === cl;
+                    return (
+                      <TouchableOpacity
+                        key={cl}
+                        style={{
+                          paddingVertical: 3,
+                          paddingHorizontal: 8,
+                          borderRadius: 12,
+                          backgroundColor: isSel ? theme.accent : theme.surfaceElevated,
+                          borderColor: isSel ? theme.accent : theme.border,
+                          borderWidth: 1
+                        }}
+                        onPress={() => setQaClubNameFilter(cl)}
+                      >
+                        <Text style={{ color: isSel ? '#fff' : theme.textSecondary, fontSize: 10, fontWeight: isSel ? '700' : '400' }}>
+                          {cl}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
             <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated }]}>
               <TextInput
                 style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
-                placeholder="Ask a question..."
+                placeholder="Ask an academic or club question..."
                 placeholderTextColor={theme.textMuted}
                 value={newQuestion}
                 onChangeText={setNewQuestion}
               />
+              <Text style={[styles.subLabel, { color: theme.accent, marginTop: 4 }]}>Academic Department Tag</Text>
               <AccessibleChipGroup
                 options={RESOURCE_DEPARTMENTS}
                 selected={newQuestionDept}
                 onSelect={setNewQuestionDept}
               />
+
+              {/* Optional Extracurricular Club Tag */}
+              <Text style={[styles.subLabel, { color: theme.accent, marginTop: 8 }]}>
+                Extracurricular Club Tag (Optional)
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginBottom: 8 }}>
+                {['None', 'Tech', 'Non-Tech', 'Sports', 'Cultural', 'Volunteering'].map((cat) => {
+                  const isSel = (cat === 'None' && !newQClubCategory) || newQClubCategory === cat;
+                  return (
+                    <TouchableOpacity
+                      key={cat}
+                      style={{
+                        paddingVertical: 4,
+                        paddingHorizontal: 10,
+                        borderRadius: 14,
+                        backgroundColor: isSel ? theme.accent : theme.card,
+                        borderWidth: 1,
+                        borderColor: isSel ? theme.accent : theme.border
+                      }}
+                      onPress={() => {
+                        setNewQClubCategory(cat === 'None' ? null : cat);
+                        setNewQClubName(null);
+                      }}
+                    >
+                      <Text style={{ color: isSel ? '#fff' : theme.text, fontSize: 11, fontWeight: isSel ? '700' : '500' }}>
+                        {cat}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {newQClubCategory && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={[styles.subLabel, { color: theme.textMuted, fontSize: 11 }]}>Select Specific {newQClubCategory} Club:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                    {(EXTRACURRICULARS[newQClubCategory === 'Non-Tech' ? 'nonTech' : newQClubCategory.toLowerCase()] || []).map((clubItem) => {
+                      const isSel = newQClubName === clubItem;
+                      return (
+                        <TouchableOpacity
+                          key={clubItem}
+                          style={{
+                            paddingVertical: 3,
+                            paddingHorizontal: 8,
+                            borderRadius: 12,
+                            backgroundColor: isSel ? theme.primary : theme.card,
+                            borderWidth: 1,
+                            borderColor: isSel ? theme.primary : theme.border
+                          }}
+                          onPress={() => setNewQClubName(clubItem)}
+                        >
+                          <Text style={{ color: isSel ? '#fff' : theme.text, fontSize: 10, fontWeight: isSel ? '700' : '400' }}>
+                            {clubItem}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
               <TouchableOpacity
-                style={[styles.primaryBtn, { backgroundColor: theme.primary }]}
+                style={[styles.primaryBtn, { backgroundColor: theme.primary, marginTop: 8 }]}
                 onPress={async () => {
                   if (!newQuestion) return;
                   await axios.post(
                     `${BACKEND_URL}/api/qa`,
-                    { question: newQuestion, department: newQuestionDept },
+                    {
+                      question: newQuestion,
+                      department: newQuestionDept,
+                      clubCategory: newQClubCategory,
+                      clubName: newQClubName
+                    },
                     apiHeader
                   );
                   setNewQuestion('');
+                  setNewQClubCategory(null);
+                  setNewQClubName(null);
                   fetchAllData();
                 }}
               >
@@ -1763,16 +2277,75 @@ function AuraWorkspace() {
 
             {filteredQA.map((qItem) => (
               <View key={qItem._id} style={[styles.resourceCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Q: {qItem.question}</Text>
-                <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 6 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <Text style={[styles.cardTitle, { color: theme.text, flex: 1, paddingRight: 6 }]}>
+                    Q: {qItem.question}
+                  </Text>
+                  {qItem.clubName ? (
+                    <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.15)', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10, borderWidth: 1, borderColor: '#38bdf8' }}>
+                      <Text style={{ color: '#0284c7', fontSize: 10, fontWeight: 'bold' }}>
+                        🏷️ {qItem.clubCategory}: {qItem.clubName}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 8, marginTop: 2 }}>
                   Asked by {qItem.askerName} ({qItem.askerRole}) • [{qItem.department}]
                 </Text>
                 {qItem.answers?.map((ans, idx) => (
-                  <View key={idx} style={[styles.answerItem, { backgroundColor: theme.surface }]}>
+                  <View key={ans._id || idx} style={[styles.answerItem, { backgroundColor: theme.surface, borderColor: ans.isAccepted ? '#10b981' : theme.border, borderWidth: ans.isAccepted ? 1.5 : 1 }]}>
+                    {ans.isAccepted && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#10b981' }}>
+                          ✅ Accepted Solution (+50 PUP)
+                        </Text>
+                      </View>
+                    )}
                     <Text style={{ color: theme.text, fontSize: 13 }}>{ans.text}</Text>
-                    <Text style={{ color: theme.accent, fontSize: 11, marginTop: 2 }}>
-                      — {ans.responderName} ({ans.responderRole})
-                    </Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                      <Text style={{ color: theme.accent, fontSize: 11 }}>
+                        — {ans.responderName} ({ans.responderRole})
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {/* Upvote Answer Button */}
+                        <TouchableOpacity
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: (ans.upvoters || []).includes(user?._id) ? 'rgba(245, 158, 11, 0.2)' : theme.card,
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderColor: (ans.upvoters || []).includes(user?._id) ? '#f59e0b' : theme.border
+                          }}
+                          onPress={() => handleUpvoteAnswer(qItem._id, ans._id)}
+                        >
+                          <Text style={{ fontSize: 11, color: '#f59e0b', fontWeight: 'bold', marginRight: 3 }}>▲</Text>
+                          <Text style={{ fontSize: 11, color: theme.text, fontWeight: '600' }}>
+                            {ans.upvotes || 0}
+                          </Text>
+                          <Text style={{ fontSize: 9, color: theme.textMuted, marginLeft: 2 }}>+10 PUP</Text>
+                        </TouchableOpacity>
+
+                        {/* Accept Solution Button (For Question Asker, Admin or Faculty) */}
+                        {!ans.isAccepted && (String(qItem.askerId) === String(user?._id) || ['Admin', 'Faculty'].includes(user?.role)) && (
+                          <TouchableOpacity
+                            style={{
+                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                              paddingHorizontal: 8,
+                              paddingVertical: 3,
+                              borderRadius: 12,
+                              borderWidth: 1,
+                              borderColor: '#10b981'
+                            }}
+                            onPress={() => handleAcceptAnswer(qItem._id, ans._id)}
+                          >
+                            <Text style={{ fontSize: 10, color: '#059669', fontWeight: 'bold' }}>✓ Accept (+50)</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
                   </View>
                 ))}
                 <View style={[styles.rowBetween, { marginTop: 8 }]}>
@@ -1809,13 +2382,44 @@ function AuraWorkspace() {
           <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text style={[styles.sectionHeader, { color: theme.text }]}>⭐ 4. Experiences & Guides</Text>
             <Text style={[styles.sectionSub, { color: theme.textMuted }]}>
-              Senior tips and career experiences with clickable 5-star ratings.
+              Senior tips, career experiences, and interview guides with ratings & Plus Ultra Points (+25 PUP for 4★+).
             </Text>
             <LocalizedSearchBar
               sectionLabel="Experiences & Guides"
               value={localSearch.guides}
               onChange={(v) => updateLocalSearch('guides', v)}
             />
+
+            {/* Topic Filter Chips */}
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.accent, marginBottom: 4 }}>
+                🏷️ Filter by Topic Tag:
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {['All', ...GUIDE_TOPIC_PRESETS].map((t) => {
+                  const isSel = guideTopicFilter === t;
+                  return (
+                    <TouchableOpacity
+                      key={t}
+                      style={{
+                        paddingVertical: 4,
+                        paddingHorizontal: 10,
+                        borderRadius: 14,
+                        backgroundColor: isSel ? theme.primary : theme.card,
+                        borderColor: isSel ? theme.primary : theme.border,
+                        borderWidth: 1
+                      }}
+                      onPress={() => setGuideTopicFilter(t)}
+                    >
+                      <Text style={{ color: isSel ? '#fff' : theme.text, fontSize: 11, fontWeight: isSel ? '700' : '500' }}>
+                        {t}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
             <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated }]}>
               <TextInput
                 style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
@@ -1825,10 +2429,40 @@ function AuraWorkspace() {
                 onChangeText={setGuideTitle}
               />
               <AccessibleChipGroup options={GUIDE_CATEGORIES} selected={guideCategory} onSelect={setGuideCategory} />
+
+              <Text style={[styles.subLabel, { color: theme.accent, marginTop: 8 }]}>Select Topic Tags (Multi-Select):</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+                {GUIDE_TOPIC_PRESETS.map((top) => {
+                  const isSel = guideSelectedTopics.includes(top);
+                  return (
+                    <TouchableOpacity
+                      key={top}
+                      style={{
+                        paddingVertical: 4,
+                        paddingHorizontal: 9,
+                        borderRadius: 12,
+                        backgroundColor: isSel ? theme.accent : theme.card,
+                        borderColor: isSel ? theme.accent : theme.border,
+                        borderWidth: 1
+                      }}
+                      onPress={() => {
+                        setGuideSelectedTopics((prev) =>
+                          isSel ? prev.filter((x) => x !== top) : [...prev, top]
+                        );
+                      }}
+                    >
+                      <Text style={{ color: isSel ? '#fff' : theme.textSecondary, fontSize: 11, fontWeight: isSel ? 'bold' : 'normal' }}>
+                        {isSel ? '✓ ' : ''}{top}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
               <TextInput
                 style={[styles.input, { minHeight: 70, backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
                 multiline
-                placeholder="Share your experience or placement strategy..."
+                placeholder="Share your experience, interview questions, or study strategy..."
                 placeholderTextColor={theme.textMuted}
                 value={guideContent}
                 onChangeText={setGuideContent}
@@ -1839,15 +2473,23 @@ function AuraWorkspace() {
                   if (!guideTitle || !guideContent) return;
                   await axios.post(
                     `${BACKEND_URL}/api/guides`,
-                    { title: guideTitle, category: guideCategory, department: guideDept, content: guideContent },
+                    {
+                      title: guideTitle,
+                      category: guideCategory,
+                      department: guideDept,
+                      content: guideContent,
+                      topics: guideSelectedTopics,
+                      tags: guideSelectedTopics
+                    },
                     apiHeader
                   );
                   setGuideTitle('');
                   setGuideContent('');
+                  setGuideSelectedTopics([]);
                   fetchAllData();
                 }}
               >
-                <Text style={styles.primaryBtnText}>Publish Guide</Text>
+                <Text style={styles.primaryBtnText}>Publish Guide (+15 PUP)</Text>
               </TouchableOpacity>
             </View>
 
@@ -1857,6 +2499,17 @@ function AuraWorkspace() {
                   <Text style={[styles.cardTitle, { color: theme.text }]}>{g.title}</Text>
                   <Text style={{ color: theme.accent, fontSize: 12, fontWeight: 'bold' }}>{g.category}</Text>
                 </View>
+
+                {g.topics && g.topics.length > 0 && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginVertical: 4 }}>
+                    {g.topics.map((tp) => (
+                      <View key={tp} style={{ backgroundColor: 'rgba(99, 102, 241, 0.12)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
+                        <Text style={{ color: theme.accent, fontSize: 10, fontWeight: '600' }}>#{tp}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
                 <Text style={[styles.summaryText, { color: theme.textSecondary, fontStyle: 'normal' }]}>{g.content}</Text>
                 <View style={styles.rowBetween}>
                   <Text style={{ color: theme.textMuted, fontSize: 11 }}>By {g.authorName} ({g.authorRole})</Text>
@@ -2511,7 +3164,7 @@ function AuraWorkspace() {
               onChange={(v) => updateLocalSearch('upload', v)}
             />
             <TouchableOpacity
-              style={[styles.primaryBtn, { backgroundColor: '#0284c7', marginBottom: 14 }]}
+              style={[styles.primaryBtn, { backgroundColor: '#0284c7', marginBottom: 8 }]}
               onPress={handlePickAndUploadToUploadthing}
               disabled={uploadingFile}
             >
@@ -2521,6 +3174,22 @@ function AuraWorkspace() {
                 <Text style={styles.primaryBtnText}>1️⃣ Select PDF & Upload to Uploadthing</Text>
               )}
             </TouchableOpacity>
+
+            {/* Instant AI Auto-Tagging Trigger */}
+            <TouchableOpacity
+              style={[styles.secondaryBtn, { borderColor: theme.accent, marginBottom: 12, backgroundColor: theme.primarySoft, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]}
+              onPress={handleAiAutoTagResource}
+              disabled={isAiAutoTaggingResource}
+            >
+              {isAiAutoTaggingResource ? (
+                <ActivityIndicator size="small" color={theme.accent} />
+              ) : (
+                <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 13 }}>
+                  ⚡ Auto-Tag with AI (Extract Dept, Sem, Type & Topics)
+                </Text>
+              )}
+            </TouchableOpacity>
+
             {uploadedPdfUrl ? (
               <Text style={{ color: theme.success, fontSize: 12, marginBottom: 10 }}>
                 ✓ Secure Uploadthing URL Ready: {uploadedPdfUrl}
@@ -2541,6 +3210,59 @@ function AuraWorkspace() {
               value={uploadCourse}
               onChangeText={setUploadCourse}
             />
+
+            {/* Rich Topic Tags & Category Multi-Select */}
+            <Text style={[styles.subLabel, { color: theme.accent }]}>Topic Tags & Category (Multi-Select)</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+              {UPLOAD_TOPIC_PRESETS.map((tPreset) => {
+                const isSel = uploadSelectedTopics.includes(tPreset);
+                return (
+                  <TouchableOpacity
+                    key={tPreset}
+                    style={{
+                      paddingVertical: 5,
+                      paddingHorizontal: 10,
+                      borderRadius: 12,
+                      backgroundColor: isSel ? theme.primary : theme.card,
+                      borderColor: isSel ? theme.primary : theme.border,
+                      borderWidth: 1
+                    }}
+                    onPress={() => {
+                      setUploadSelectedTopics((prev) =>
+                        isSel ? prev.filter((x) => x !== tPreset) : [...prev, tPreset]
+                      );
+                    }}
+                  >
+                    <Text style={{ color: isSel ? '#fff' : theme.text, fontSize: 11, fontWeight: isSel ? '700' : '400' }}>
+                      {isSel ? '✓ ' : ''}{tPreset}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Custom Topic Tag Input */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+              <TextInput
+                style={[styles.input, { flex: 1, marginBottom: 0, marginRight: 8, backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+                placeholder="Add custom topic tag..."
+                placeholderTextColor={theme.textMuted}
+                value={customTopicInput}
+                onChangeText={setCustomTopicInput}
+              />
+              <TouchableOpacity
+                style={[styles.previewBtn, { backgroundColor: theme.accent }]}
+                onPress={() => {
+                  const clean = customTopicInput.trim();
+                  if (clean && !uploadSelectedTopics.includes(clean)) {
+                    setUploadSelectedTopics([...uploadSelectedTopics, clean]);
+                    setCustomTopicInput('');
+                  }
+                }}
+              >
+                <Text style={styles.previewBtnText}>+ Add</Text>
+              </TouchableOpacity>
+            </View>
 
             <Text style={[styles.subLabel, { color: theme.accent }]}>Department ("All" Allowed Here)</Text>
             <AccessibleChipGroup
@@ -2758,6 +3480,76 @@ function AuraWorkspace() {
                     <AccessibleChipGroup multi options={EXTRACURRICULARS.volunteering} selected={noteVolunteeringGroups} onSelect={setNoteVolunteeringGroups} />
                   </>
                 )}
+
+                {/* LIVE NOTIFICATION RECIPIENT PREVIEW BANNER */}
+                {(() => {
+                  let audienceText = '';
+                  if (noteTargetAll) {
+                    audienceText = 'Entire Campus (All Departments, All Years & All Extracurricular Groups)';
+                  } else {
+                    const parts = [];
+
+                    // Clubs / Groups
+                    const selectedGroups = [
+                      ...noteVolunteeringGroups,
+                      ...noteTechClubs,
+                      ...noteNonTechClubs,
+                      ...noteSportsTeams,
+                      ...noteCulturalAssocs
+                    ];
+                    if (selectedGroups.length > 0) {
+                      parts.push(
+                        selectedGroups.length <= 3
+                          ? selectedGroups.join(', ')
+                          : `${selectedGroups.slice(0, 3).join(', ')} +${selectedGroups.length - 3} more`
+                      );
+                    }
+
+                    // Years
+                    if (noteTargetAllYears || noteYears.includes('All Years') || noteYears.length === 0) {
+                      parts.push('All Years');
+                    } else {
+                      parts.push(noteYears.map(y => `${y}${y === 1 ? 'st' : y === 2 ? 'nd' : y === 3 ? 'rd' : 'th'} Yr`).join(' & '));
+                    }
+
+                    // Departments
+                    if (noteDepts.length > 0 && !noteDepts.includes('All')) {
+                      parts.push(
+                        noteDepts.length <= 3
+                          ? noteDepts.join(', ')
+                          : `${noteDepts.slice(0, 3).join(', ')} +${noteDepts.length - 3} more`
+                      );
+                    } else {
+                      parts.push('All Departments');
+                    }
+
+                    audienceText = parts.join(' • ');
+                  }
+
+                  return (
+                    <View
+                      style={{
+                        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                        borderColor: '#0284c7',
+                        borderWidth: 1.5,
+                        borderRadius: 10,
+                        padding: 10,
+                        marginTop: 12,
+                        marginBottom: 4
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                        <Text style={{ fontSize: 13, marginRight: 5 }}>🎯</Text>
+                        <Text style={{ color: '#0284c7', fontWeight: 'bold', fontSize: 12 }}>
+                          Live Recipient Audience Preview:
+                        </Text>
+                      </View>
+                      <Text style={{ color: theme.text, fontSize: 12, fontWeight: '600', lineHeight: 16 }}>
+                        {audienceText}
+                      </Text>
+                    </View>
+                  );
+                })()}
 
                 <TouchableOpacity
                   style={[styles.primaryBtn, { backgroundColor: theme.primary, marginTop: 10 }]}
@@ -3107,6 +3899,62 @@ function AuraWorkspace() {
                 </Text>
               </View>
             )}
+
+            {/* PLUS ULTRA ACADEMY STATUS & BADGES */}
+            <View
+              style={{
+                backgroundColor: theme.surfaceElevated,
+                borderRadius: 12,
+                padding: 14,
+                marginBottom: 14,
+                borderWidth: 1.5,
+                borderColor: '#f59e0b'
+              }}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#f59e0b' }}>
+                    ⚡ Plus Ultra Academy Status
+                  </Text>
+                  <Text style={{ fontSize: 22, fontWeight: 'bold', color: theme.text, marginTop: 2 }}>
+                    {currentUserPUPMeta?.points || user.plusUltraPoints || 0} PUP
+                  </Text>
+                </View>
+                <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16 }}>
+                  <Text style={{ color: '#d97706', fontWeight: 'bold', fontSize: 12 }}>
+                    {(currentUserPUPMeta?.points || user.plusUltraPoints || 0) >= 300
+                      ? '⭐ Elite Mentor'
+                      : (currentUserPUPMeta?.points || user.plusUltraPoints || 0) >= 100
+                      ? '🎖️ Active Scholar'
+                      : '🌱 Aspirant'}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 6 }}>
+                Campus Rank: #{currentUserPUPMeta?.rank || 1} • Earn points via accepted Q&A solutions & verified contributions.
+              </Text>
+
+              {user.badges && user.badges.length > 0 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                  {user.badges.map((b) => (
+                    <View
+                      key={b}
+                      style={{
+                        backgroundColor: theme.card,
+                        borderWidth: 1,
+                        borderColor: '#f59e0b',
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 12
+                      }}
+                    >
+                      <Text style={{ color: theme.accent, fontSize: 11, fontWeight: '600' }}>🏆 {b}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
 
             {profileStats && (
               <View style={styles.statsGrid}>
@@ -3472,6 +4320,163 @@ function AuraWorkspace() {
               </Text>
             </View>
 
+            {/* SUB-TAB SELECTOR: ADMIN APPROVALS vs PROMOTE ACADEMIC YEAR */}
+            <View style={{ flexDirection: 'row', backgroundColor: theme.surfaceElevated, borderRadius: 10, padding: 4, marginVertical: 12 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  backgroundColor: approvalsSubTab === 'admins' ? theme.primary : 'transparent',
+                  alignItems: 'center'
+                }}
+                onPress={() => setApprovalsSubTab('admins')}
+              >
+                <Text style={{ color: approvalsSubTab === 'admins' ? '#fff' : theme.text, fontWeight: '700', fontSize: 13 }}>
+                  🛡️ Admin Approvals ({pendingAdmins.length})
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  backgroundColor: approvalsSubTab === 'promotion' ? theme.primary : 'transparent',
+                  alignItems: 'center'
+                }}
+                onPress={() => {
+                  setApprovalsSubTab('promotion');
+                  fetchCohortStats();
+                }}
+              >
+                <Text style={{ color: approvalsSubTab === 'promotion' ? '#fff' : theme.text, fontWeight: '700', fontSize: 13 }}>
+                  🎓 Promote Academic Year
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {approvalsSubTab === 'promotion' ? (
+              <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated, marginBottom: 16 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={{ fontSize: 22, marginRight: 8 }}>🎓</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: 'bold', color: theme.text }}>
+                      Batch Cohort Academic Year Promotion
+                    </Text>
+                    <Text style={{ fontSize: 11, color: theme.textMuted }}>
+                      Independent triggers per cohort. Batches start on different dates; promote when term concludes.
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Cohort Stats Summary */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 10 }}>
+                  <View style={[styles.statBox, { backgroundColor: theme.card, flex: 1, minWidth: '45%', padding: 8 }]}>
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>1ST YEAR ACTIVE</Text>
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.text }}>{cohortStats?.cohort1 ?? '...'}</Text>
+                  </View>
+                  <View style={[styles.statBox, { backgroundColor: theme.card, flex: 1, minWidth: '45%', padding: 8 }]}>
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>2ND YEAR ACTIVE</Text>
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.text }}>{cohortStats?.cohort2 ?? '...'}</Text>
+                  </View>
+                  <View style={[styles.statBox, { backgroundColor: theme.card, flex: 1, minWidth: '45%', padding: 8 }]}>
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>3RD YEAR ACTIVE</Text>
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.text }}>{cohortStats?.cohort3 ?? '...'}</Text>
+                  </View>
+                  <View style={[styles.statBox, { backgroundColor: theme.card, flex: 1, minWidth: '45%', padding: 8 }]}>
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>4TH YEAR ACTIVE</Text>
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.text }}>
+                      {cohortStats?.cohort4Total ?? '...'} ({cohortStats?.cohort4ArchDs ?? 0} ARCH/DS)
+                    </Text>
+                  </View>
+                  <View style={[styles.statBox, { backgroundColor: theme.card, flex: 1, minWidth: '45%', padding: 8 }]}>
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>5TH YEAR (ARCH & DS)</Text>
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.accent }}>{cohortStats?.cohort5 ?? '...'}</Text>
+                  </View>
+                  <View style={[styles.statBox, { backgroundColor: theme.card, flex: 1, minWidth: '45%', padding: 8 }]}>
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>GRADUATED ALUMNI</Text>
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.success }}>{cohortStats?.alumni ?? '...'}</Text>
+                  </View>
+                </View>
+
+                {/* INDIVIDUAL COHORT PROMOTION CARDS */}
+                {[
+                  {
+                    cohort: 1,
+                    title: 'Cohort 1: 1st Year ➔ 2nd Year',
+                    desc: 'Promotes all active 1st-year students to 2nd-year academic standing.',
+                    count: cohortStats?.cohort1 ?? 0,
+                    btnLabel: 'Promote 1st Year ➔ 2nd Year'
+                  },
+                  {
+                    cohort: 2,
+                    title: 'Cohort 2: 2nd Year ➔ 3rd Year (Auto Senior Upgrade)',
+                    desc: 'Promotes 2nd-year students to 3rd Year and auto-upgrades their role to "Senior Student" (enabling student mentoring & document verification privileges).',
+                    count: cohortStats?.cohort2 ?? 0,
+                    btnLabel: 'Promote 2nd Year ➔ 3rd Year (+ Senior Role)'
+                  },
+                  {
+                    cohort: 3,
+                    title: 'Cohort 3: 3rd Year ➔ 4th Year',
+                    desc: 'Promotes all current 3rd-year students to final 4th-year status.',
+                    count: cohortStats?.cohort3 ?? 0,
+                    btnLabel: 'Promote 3rd Year ➔ 4th Year'
+                  },
+                  {
+                    cohort: 4,
+                    title: 'Cohort 4: 4th Year ➔ 5th Year (ARCH & DS) or Graduate',
+                    desc: 'Strictly 5-Year Degree programs (Architecture & Data Science) advance to 5th Year. All other standard 4-year department students graduate to Alumni.',
+                    count: cohortStats?.cohort4Total ?? 0,
+                    btnLabel: 'Process 4th Year Batch'
+                  },
+                  {
+                    cohort: 5,
+                    title: 'Cohort 5: 5th Year ARCH & DS ➔ Graduate',
+                    desc: 'Graduates final 5th-year ARCH and DS students and archives accounts to verified Alumni status.',
+                    count: cohortStats?.cohort5 ?? 0,
+                    btnLabel: 'Graduate 5th Year (ARCH/DS) ➔ Alumni'
+                  }
+                ].map((item) => (
+                  <View
+                    key={item.cohort}
+                    style={{
+                      backgroundColor: theme.card,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      borderRadius: 10,
+                      padding: 12,
+                      marginBottom: 10
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: theme.text }}>
+                      {item.title}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 3, lineHeight: 16 }}>
+                      {item.desc}
+                    </Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: theme.accent }}>
+                        Cohort Size: {item.count} student(s)
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.smallBadgeBtn, { backgroundColor: theme.primary, minWidth: 140 }]}
+                        onPress={() => handlePromoteCohort(item.cohort)}
+                        disabled={promotingCohort === item.cohort}
+                      >
+                        {promotingCohort === item.cohort ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
+                            {item.btnLabel}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <>
             {/* PENDING ADMIN APPROVALS QUEUE */}
             <View style={[styles.formBox, { backgroundColor: theme.surfaceElevated, marginBottom: 16 }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -3677,9 +4682,11 @@ function AuraWorkspace() {
                 })
               )}
             </View>
-          </View>
-        );
-      }
+          </>
+        )}
+      </View>
+    );
+  }
 
       default:
         return null;

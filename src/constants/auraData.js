@@ -31,7 +31,7 @@ export const getAvailableYears = (dept) => {
 // Valid for Uploading, Filtering & Searching (Includes "All")
 export const RESOURCE_DEPARTMENTS = ['All', ...PROFILE_DEPARTMENTS];
 
-export const ROLES = ['Student', 'Senior Student', 'Faculty', 'Admin'];
+export const ROLES = ['Student', 'Senior Student', 'Faculty', 'Admin', 'Alumni'];
 
 export const FACULTY_SUBROLES = ['HOD', 'Professor', 'Assistant Prof', 'Lab Tech'];
 
@@ -39,8 +39,24 @@ export const RESOURCE_TYPES = [
   'Lecture Notes', 'Question Bank', 'Lab Manual', 'Syllabus', 'Reference Book'
 ];
 
+export const UPLOAD_TOPIC_PRESETS = [
+  'Exam Prep', 'Lab Manual', 'Formula Sheet', 'Previous Year Questions (PYQ)',
+  'Important Derivations', 'Solved Assignments', 'Project Report', 'GATE / Competitive',
+  'Handwritten Notes', 'Question Bank'
+];
+
 export const GUIDE_CATEGORIES = [
   'Placement Tip', 'Course Experience', 'Study Hack', 'Internship Guide', 'Campus Life'
+];
+
+export const GUIDE_TOPIC_PRESETS = [
+  'Interview Prep', 'Resume Building', 'Internship Experience', 'Off-Campus Drive',
+  'Coding Rounds', 'System Design', 'Core Engineering', 'Higher Studies / GRE / GATE',
+  'Hackathon Strategy', 'Campus Life & Balance'
+];
+
+export const QNA_CLUB_CATEGORIES = [
+  'All', 'Tech', 'Non-Tech', 'Sports', 'Cultural', 'Volunteering'
 ];
 
 export const EXTRACURRICULARS = {
