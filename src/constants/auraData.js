@@ -66,38 +66,95 @@ export const EXTRACURRICULARS = {
   volunteering: ['NCC', 'NSS', 'YRC']
 };
 
-export const ORDERED_TABS = [
-  { id: 1, key: 'dashboard', label: '1. Smart Dashboard', shortLabel: 'Smart Feed', icon: '⚡', desc: 'Dept & Year personalized stream' },
-  { id: 2, key: 'library', label: '2. Academic Library', shortLabel: 'Library', icon: '📚', desc: 'TRIZ Course ▸ Sem ▸ Type vault' },
-  { id: 3, key: 'qa', label: '3. Q&A Board', shortLabel: 'Q&A Forum', icon: '💬', desc: 'Peer-to-peer discussion board' },
-  { id: 4, key: 'guides', label: '4. Experiences & Guides', shortLabel: 'Guides', icon: '⭐', desc: 'Senior tips & 5-star ratings' },
-  { id: 5, key: 'laura', label: '5. Ask LAURA AI', shortLabel: 'LAURA AI', icon: '🤖', desc: 'Verified-only RAG assistant' },
-  { id: 6, key: 'upload', label: '6. Upload Hub', shortLabel: 'Upload', icon: '☁️', desc: 'Uploadthing + AI auto-tagging' },
-  { id: 7, key: 'search', label: '7. Global AI Search', shortLabel: 'Omni Search', icon: '🔍', desc: 'Unified Library, Q&A & Guides' },
-  { id: 8, key: 'notifications', label: '8. Notifications', shortLabel: 'Alerts', icon: '🔔', desc: 'Multi-target blasts & triggers' },
-  { id: 9, key: 'profile', label: '9. Profile', shortLabel: 'Profile', icon: '👤', desc: 'Stats, Dept/Year & Club arrays' },
-  { id: 10, key: 'logout', label: '10. Logout', shortLabel: 'Logout', icon: '🚪', desc: 'Wipe session & local cache' }
+export const BUG_CATEGORIES = [
+  'App Crashes / Unexpected Freeze',
+  'Notification Delay or Not Received',
+  'Login / Auth / Session Issue',
+  'UI Glitch / Layout Overlap',
+  'Slow Loading / Network Timeout',
+  'PDF / Document Viewer Issue',
+  'Custom / Other Bug'
 ];
 
+export const BUG_SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
+
+export const JOB_TYPES = ['Internship', 'Full-Time', 'Part-Time', 'Hiring Challenge'];
+
+export const BASE_ORDERED_TABS = [
+  { key: 'dashboard', baseLabel: 'Smart Dashboard', shortLabel: 'Smart Feed', icon: '⚡', desc: 'Dept & Year personalized stream' },
+  { key: 'library', baseLabel: 'Academic Library', shortLabel: 'Library', icon: '📚', desc: 'TRIZ Course ▸ Sem ▸ Type vault' },
+  { key: 'qa', baseLabel: 'Q&A Board', shortLabel: 'Q&A Forum', icon: '💬', desc: 'Peer-to-peer discussion board' },
+  { key: 'guides', baseLabel: 'Experiences & Guides', shortLabel: 'Guides', icon: '⭐', desc: 'Senior tips & 5-star ratings' },
+  { key: 'updates', baseLabel: 'Campus Updates', shortLabel: 'Updates', icon: '💼', desc: 'Hiring radar & placement approvals' },
+  { key: 'laura', baseLabel: 'Ask LAURA AI', shortLabel: 'LAURA AI', icon: '🤖', desc: 'Verified-only RAG assistant' },
+  { key: 'upload', baseLabel: 'Upload Hub', shortLabel: 'Upload', icon: '☁️', desc: 'Uploadthing + AI auto-tagging' },
+  { key: 'search', baseLabel: 'Global AI Search', shortLabel: 'Omni Search', icon: '🔍', desc: 'Unified Library, Q&A & Guides' },
+  { key: 'notifications', baseLabel: 'Notifications', shortLabel: 'Alerts', icon: '🔔', desc: 'Multi-target blasts & triggers' }
+];
+
+export const ORDERED_TABS = BASE_ORDERED_TABS.map((t, idx) => ({
+  ...t,
+  id: idx + 1,
+  label: `${idx + 1}. ${t.baseLabel}`
+}));
+
 export function getOrderedTabs(user) {
-  const tabs = [...ORDERED_TABS];
-  if (user?.isPrimaryAdmin) {
-    const profileIdx = tabs.findIndex(t => t.key === 'profile');
-    if (profileIdx !== -1) {
-      tabs.splice(profileIdx + 1, 0, {
-        id: 10,
-        key: 'approvals',
-        label: '10. Account Approvals',
-        shortLabel: 'Approvals',
-        icon: '🛡️',
-        desc: 'Review & approve Admin registrations'
-      });
-      const logoutTab = tabs.find(t => t.key === 'logout');
-      if (logoutTab) {
-        logoutTab.id = 11;
-        logoutTab.label = '11. Logout';
-      }
-    }
+  const tabs = [...BASE_ORDERED_TABS];
+
+  // Admin View: Route all submitted reports to an admin-only tab named Support and Feedback Hub, add this tab after notifications tab.
+  if (user?.role === 'Admin') {
+    tabs.push({
+      key: 'support',
+      baseLabel: 'Support and Feedback Hub',
+      shortLabel: 'Support Hub',
+      icon: '🛠️',
+      desc: 'Bug reports & user assistance triage'
+    });
   }
-  return tabs;
+
+  // Profile tab
+  tabs.push({
+    key: 'profile',
+    baseLabel: 'Profile',
+    shortLabel: 'Profile',
+    icon: '👤',
+    desc: 'Stats, Dept/Year & Club arrays'
+  });
+
+  // User-Facing "Help" Tab: Add a Help tab after profile(don't include this tab for admins), where users can report bugs.
+  if (user?.role !== 'Admin') {
+    tabs.push({
+      key: 'help',
+      baseLabel: 'Help & Report Bug',
+      shortLabel: 'Help Desk',
+      icon: '🆘',
+      desc: 'Report bugs & request app assistance'
+    });
+  }
+
+  // Primary Admin: Dedicated Account Approvals tab
+  if (user?.isPrimaryAdmin) {
+    tabs.push({
+      key: 'approvals',
+      baseLabel: 'Account Approvals',
+      shortLabel: 'Approvals',
+      icon: '🛡️',
+      desc: 'Review & approve Admin registrations'
+    });
+  }
+
+  // Logout
+  tabs.push({
+    key: 'logout',
+    baseLabel: 'Logout',
+    shortLabel: 'Logout',
+    icon: '🚪',
+    desc: 'Wipe session & local cache'
+  });
+
+  return tabs.map((t, idx) => ({
+    ...t,
+    id: idx + 1,
+    label: `${idx + 1}. ${t.baseLabel}`
+  }));
 }

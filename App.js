@@ -12,7 +12,9 @@ import {
   useWindowDimensions,
   Animated,
   PanResponder,
-  StatusBar as RNStatusBar
+  StatusBar as RNStatusBar,
+  Linking,
+  Modal
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -36,7 +38,10 @@ import {
   GUIDE_CATEGORIES,
   EXTRACURRICULARS,
   ORDERED_TABS,
-  getOrderedTabs
+  getOrderedTabs,
+  BUG_CATEGORIES,
+  BUG_SEVERITIES,
+  JOB_TYPES
 } from './src/constants/auraData';
 import { ThemeProvider, useAuraTheme } from './src/theme/ThemeContext';
 import AdaptiveNavigation from './src/components/AdaptiveNavigation';
@@ -210,11 +215,14 @@ function AuraWorkspace() {
     library: '',
     qa: '',
     guides: '',
+    updates: '',
     laura: '',
     upload: '',
     search: '',
     notifications: '',
+    support: '',
     profile: '',
+    help: '',
     approvals: ''
   });
   const updateLocalSearch = (key, val) =>
@@ -227,6 +235,53 @@ function AuraWorkspace() {
   const [notifications, setNotifications] = useState([]);
   const [profileStats, setProfileStats] = useState(null);
   const [adminUsers, setAdminUsers] = useState([]);
+  const [jobsData, setJobsData] = useState({
+    jobs: [],
+    canApproveGlobally: false,
+    canApproveDepartments: [],
+    isPlacementInCharge: false,
+    managedDepartment: null
+  });
+  const [supportTickets, setSupportTickets] = useState([]);
+  const [placementIncharges, setPlacementIncharges] = useState([]);
+
+  // --- TAB: UPDATES & HIRING STATE ---
+  const [hiringSubTab, setHiringSubTab] = useState('radar'); // 'radar' | 'approvals' | 'create'
+  const [jobCompany, setJobCompany] = useState('');
+  const [jobRole, setJobRole] = useState('');
+  const [jobType, setJobType] = useState('Internship');
+  const [jobDescription, setJobDescription] = useState('');
+  const [jobApplyUrl, setJobApplyUrl] = useState('');
+  const [jobSourceUrl, setJobSourceUrl] = useState('');
+  const [jobLocation, setJobLocation] = useState('On-site / Hybrid');
+  const [jobStipend, setJobStipend] = useState('Competitive');
+  const [jobDeadline, setJobDeadline] = useState('');
+  const [jobTargetDepts, setJobTargetDepts] = useState(['CSE', 'IT', 'DS']);
+  const [jobTargetYears, setJobTargetYears] = useState([3, 4]);
+  const [jobAdminImmediate, setJobAdminImmediate] = useState(false);
+  const [jobSubmitting, setJobSubmitting] = useState(false);
+  const [jobAiTagging, setJobAiTagging] = useState(false);
+
+  // Review & 1-Tap Approval Modal state
+  const [reviewJobModal, setReviewJobModal] = useState(null);
+  const [reviewSelectedDepts, setReviewSelectedDepts] = useState([]);
+  const [reviewSelectedYears, setReviewSelectedYears] = useState([3, 4]);
+  const [reviewApproving, setReviewApproving] = useState(false);
+
+  // --- TAB: USER HELP & BUG REPORT STATE ---
+  const [helpCategory, setHelpCategory] = useState(BUG_CATEGORIES[0]);
+  const [helpTitle, setHelpTitle] = useState('');
+  const [helpDescription, setHelpDescription] = useState('');
+  const [helpSeverity, setHelpSeverity] = useState('Medium');
+  const [helpScreenshot, setHelpScreenshot] = useState(null);
+  const [helpSubmitting, setHelpSubmitting] = useState(false);
+  const [helpSuccess, setHelpSuccess] = useState(false);
+
+  // --- TAB: ADMIN SUPPORT & FEEDBACK HUB STATE ---
+  const [supportFilter, setSupportFilter] = useState('All');
+  const [activeTicketModal, setActiveTicketModal] = useState(null);
+  const [ticketAdminNotes, setTicketAdminNotes] = useState('');
+  const [ticketUpdating, setTicketUpdating] = useState(false);
 
   // --- IN-APP PDF READER MODAL ---
   const [pdfModal, setPdfModal] = useState({ visible: false, url: '', title: '' });
@@ -375,23 +430,31 @@ function AuraWorkspace() {
 
   const fetchAllData = async () => {
     try {
-      const [resList, qaList, guideList, noteList, statsRes] = await Promise.all([
+      const [resList, qaList, guideList, noteList, statsRes, jobsRes] = await Promise.all([
         axios.get(`${BACKEND_URL}/api/resources`, apiHeader),
         axios.get(`${BACKEND_URL}/api/qa`, apiHeader),
         axios.get(`${BACKEND_URL}/api/guides`, apiHeader),
         axios.get(`${BACKEND_URL}/api/notifications`, apiHeader),
-        axios.get(`${BACKEND_URL}/api/profile/stats`, apiHeader)
+        axios.get(`${BACKEND_URL}/api/profile/stats`, apiHeader),
+        axios.get(`${BACKEND_URL}/api/jobs`, apiHeader).catch(() => ({ data: { jobs: [] } }))
       ]);
       setResources(resList.data);
       setQuestions(qaList.data);
       setGuides(guideList.data);
       setNotifications(noteList.data);
       setProfileStats(statsRes.data);
+      if (jobsRes.data) setJobsData(jobsRes.data);
       syncIncomingNotifications(noteList.data);
 
       if (user?.role === 'Admin') {
-        const usersRes = await axios.get(`${BACKEND_URL}/api/admin/users`, apiHeader);
+        const [usersRes, ticketsRes, inchargesRes] = await Promise.all([
+          axios.get(`${BACKEND_URL}/api/admin/users`, apiHeader).catch(() => ({ data: { users: [] } })),
+          axios.get(`${BACKEND_URL}/api/support/tickets`, apiHeader).catch(() => ({ data: [] })),
+          axios.get(`${BACKEND_URL}/api/admin/placement-incharges`, apiHeader).catch(() => ({ data: { incharges: [] } }))
+        ]);
         setAdminUsers(usersRes.data.users || usersRes.data);
+        if (ticketsRes.data) setSupportTickets(ticketsRes.data);
+        if (inchargesRes.data) setPlacementIncharges(inchargesRes.data.incharges || []);
       }
     } catch (err) {
       console.log('Sync error:', err.message);
@@ -782,6 +845,262 @@ function AuraWorkspace() {
       Alert.alert('LAURA Error', err.message);
     } finally {
       setLauraLoading(false);
+    }
+  };
+
+  // --- HIRING & UPDATES ACTION HANDLERS ---
+  const handleAiAutoTag = async () => {
+    if (!jobRole && !jobDescription) {
+      return Alert.alert('Input Needed', 'Please enter a Role title or Description first to run AI auto-tagging.');
+    }
+    try {
+      setJobAiTagging(true);
+      const res = await axios.post(`${BACKEND_URL}/api/jobs/ai-autotag`, {
+        role: jobRole,
+        description: jobDescription,
+        company: jobCompany
+      }, apiHeader);
+
+      if (res.data?.targetDepartments?.length > 0) {
+        setJobTargetDepts(res.data.targetDepartments);
+      }
+      if (res.data?.targetYears?.length > 0) {
+        setJobTargetYears(res.data.targetYears);
+      }
+      Alert.alert(
+        'AI Auto-Tag Complete',
+        `Tagged Departments: ${res.data.targetDepartments.join(', ')}\nDefault Target Years: ${res.data.targetYears.map(y => `Yr ${y}`).join(', ')}${res.data.targetYears.includes(5) ? ' (Includes Yr 5 for ARCH/DS)' : ''}\n\nNote: 1st & 2nd years can be optionally selected below.`
+      );
+    } catch (err) {
+      Alert.alert('AI Tagging Error', err.response?.data?.error || err.message);
+    } finally {
+      setJobAiTagging(false);
+    }
+  };
+
+  const handleCreateJob = async () => {
+    if (!jobCompany.trim()) return Alert.alert('Required', 'Please enter Company name.');
+    if (!jobRole.trim()) return Alert.alert('Required', 'Please enter Role title.');
+    if (!jobDescription.trim()) return Alert.alert('Required', 'Please provide job description & requirements.');
+    if (!jobApplyUrl.trim()) return Alert.alert('Required', 'Please provide an application or LinkedIn link.');
+    if (jobTargetDepts.length === 0) return Alert.alert('Target Needed', 'Select at least one eligible department.');
+
+    try {
+      setJobSubmitting(true);
+      await axios.post(`${BACKEND_URL}/api/jobs`, {
+        company: jobCompany.trim(),
+        role: jobRole.trim(),
+        jobType,
+        description: jobDescription.trim(),
+        applyUrl: jobApplyUrl.trim(),
+        sourceUrl: jobSourceUrl.trim(),
+        location: jobLocation.trim(),
+        stipendOrSalary: jobStipend.trim(),
+        deadline: jobDeadline.trim(),
+        targetDepartments: jobTargetDepts,
+        targetYears: jobTargetYears,
+        adminImmediatePublish: user?.role === 'Admin' && jobAdminImmediate
+      }, apiHeader);
+
+      await fetchAllData();
+      setJobCompany('');
+      setJobRole('');
+      setJobDescription('');
+      setJobApplyUrl('');
+      setJobSourceUrl('');
+      setJobDeadline('');
+      setHiringSubTab('radar');
+      Alert.alert('Success', 'Hiring post submitted! Department in-charges have been notified for review & approval.');
+    } catch (err) {
+      Alert.alert('Error', err.response?.data?.error || err.message);
+    } finally {
+      setJobSubmitting(false);
+    }
+  };
+
+  const handleOpenReviewModal = (job) => {
+    const isAdmin = user?.role === 'Admin';
+    const inChargeDept = user?.placementDepartment || (user?.isPlacementInCharge ? user?.department : null);
+
+    setReviewJobModal(job);
+    setReviewSelectedYears(job.targetYears && job.targetYears.length > 0 ? job.targetYears : [3, 4]);
+
+    if (isAdmin) {
+      const pendingDepts = (job.departmentApprovals || [])
+        .filter((da) => da.status === 'Pending')
+        .map((da) => da.department);
+      setReviewSelectedDepts(pendingDepts.length > 0 ? pendingDepts : job.targetDepartments || []);
+    } else if (inChargeDept) {
+      setReviewSelectedDepts([inChargeDept]);
+    }
+  };
+
+  const handleApproveDepartment = async (jobId) => {
+    if (reviewSelectedDepts.length === 0) {
+      return Alert.alert('Selection Required', 'Please select at least one department to approve.');
+    }
+    if (reviewSelectedYears.length === 0) {
+      return Alert.alert('Target Years Required', 'Please select at least one target year cohort.');
+    }
+    try {
+      setReviewApproving(true);
+      const isAdmin = user?.role === 'Admin';
+      const isAllSelected = reviewSelectedDepts.length === (reviewJobModal?.targetDepartments?.length || 0);
+
+      const res = await axios.patch(
+        `${BACKEND_URL}/api/jobs/${jobId}/approve-department`,
+        {
+          departmentsToApprove: reviewSelectedDepts,
+          isGlobalAdminOverride: isAdmin && isAllSelected,
+          updatedTargetYears: reviewSelectedYears
+        },
+        apiHeader
+      );
+
+      await fetchAllData();
+      setReviewJobModal(null);
+      Alert.alert(
+        'Department Approved & Broadcasted',
+        `Approved for: ${res.data.approvedDepartments.join(', ')}!\nPush notifications dispatched to eligible students in these departments.`
+      );
+    } catch (err) {
+      Alert.alert('Approval Error', err.response?.data?.error || err.message);
+    } finally {
+      setReviewApproving(false);
+    }
+  };
+
+  const handleRejectDepartment = async (jobId, dept) => {
+    try {
+      await axios.patch(
+        `${BACKEND_URL}/api/jobs/${jobId}/reject-department`,
+        { departmentToReject: dept },
+        apiHeader
+      );
+      await fetchAllData();
+      if (reviewJobModal) setReviewJobModal(null);
+      Alert.alert('Rejected', `Hiring update rejected for department ${dept}.`);
+    } catch (err) {
+      Alert.alert('Reject Error', err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleDeleteJob = async (jobId) => {
+    Alert.alert('Confirm Delete', 'Are you sure you want to delete this hiring update?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await axios.delete(`${BACKEND_URL}/api/jobs/${jobId}`, apiHeader);
+            await fetchAllData();
+            Alert.alert('Deleted', 'Hiring post removed.');
+          } catch (err) {
+            Alert.alert('Error', err.response?.data?.error || err.message);
+          }
+        }
+      }
+    ]);
+  };
+
+  // --- HELP & BUG REPORTING ACTION HANDLERS ---
+  const handlePickScreenshot = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: 'image/*'
+      });
+      if (res.canceled) return;
+      setHelpScreenshot(res.assets[0]);
+    } catch (err) {
+      Alert.alert('Screenshot Picker Error', err.message);
+    }
+  };
+
+  const handleSubmitBugReport = async () => {
+    if (!helpTitle.trim()) return Alert.alert('Required', 'Please enter a summary title for the bug.');
+    if (!helpDescription.trim()) return Alert.alert('Required', 'Please describe the bug and what happened.');
+
+    try {
+      setHelpSubmitting(true);
+      let screenshotUrl = null;
+
+      if (helpScreenshot) {
+        const formData = new FormData();
+        if (Platform.OS === 'web' && helpScreenshot.file) {
+          formData.append('screenshot', helpScreenshot.file);
+        } else {
+          formData.append('screenshot', {
+            uri: helpScreenshot.uri,
+            name: helpScreenshot.name || 'screenshot.png',
+            type: helpScreenshot.mimeType || 'image/png'
+          });
+        }
+        const uploadRes = await axios.post(`${BACKEND_URL}/api/support/upload-screenshot`, formData, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        screenshotUrl = uploadRes.data?.url;
+      }
+
+      const deviceInfo = {
+        os: Platform.OS,
+        osVersion: String(Platform.Version),
+        appVersion: '2.0.0 (Expo SDK 58)',
+        screenDimensions: `${Math.round(width)}x${Math.round(height)}`,
+        deviceBrand: Platform.constants?.Brand || Platform.OS,
+        platform: Platform.OS
+      };
+
+      await axios.post(
+        `${BACKEND_URL}/api/support/tickets`,
+        {
+          category: helpCategory,
+          title: helpTitle.trim(),
+          description: helpDescription.trim(),
+          severity: helpSeverity,
+          screenshotUrl,
+          deviceInfo
+        },
+        apiHeader
+      );
+
+      setHelpTitle('');
+      setHelpDescription('');
+      setHelpScreenshot(null);
+      setHelpSuccess(true);
+      Alert.alert(
+        'Bug Report Submitted',
+        'Thank you! Your bug report along with automatic device diagnostics has been sent directly to the Admin Support and Feedback Hub.'
+      );
+    } catch (err) {
+      Alert.alert('Submission Error', err.response?.data?.error || err.message);
+    } finally {
+      setHelpSubmitting(false);
+    }
+  };
+
+  const handleUpdateTicketStatus = async (ticketId, newStatus) => {
+    try {
+      setTicketUpdating(true);
+      await axios.patch(
+        `${BACKEND_URL}/api/support/tickets/${ticketId}`,
+        {
+          status: newStatus,
+          adminNotes: ticketAdminNotes
+        },
+        apiHeader
+      );
+      await fetchAllData();
+      setActiveTicketModal(null);
+      setTicketAdminNotes('');
+      Alert.alert('Ticket Updated', `Ticket marked as "${newStatus}"!`);
+    } catch (err) {
+      Alert.alert('Update Error', err.response?.data?.error || err.message);
+    } finally {
+      setTicketUpdating(false);
     }
   };
 
@@ -1212,7 +1531,8 @@ function AuraWorkspace() {
     return !q || `${n.title} ${n.message} ${n.entryPathTriggers?.join(' ')}`.toLowerCase().includes(q);
   });
 
-  const currentTabMeta = ORDERED_TABS.find((t) => t.key === activeTabKey) || ORDERED_TABS[0];
+  const activeOrderedTabs = getOrderedTabs(user);
+  const currentTabMeta = activeOrderedTabs.find((t) => t.key === activeTabKey) || activeOrderedTabs[0];
 
   // --- REUSABLE RESOURCE CARD ---
   const renderResourceCard = (item) => (
@@ -1566,6 +1886,578 @@ function AuraWorkspace() {
             ))}
           </View>
         );
+
+      case 'updates': {
+        const isAdmin = user.role === 'Admin';
+        const inChargeDept = user.placementDepartment || (user.isPlacementInCharge ? user.department : null);
+        const canReviewOrPost = isAdmin || Boolean(user.isPlacementInCharge && inChargeDept);
+
+        const publishedJobs = (jobsData.jobs || []).filter((j) => {
+          if (isAdmin) return true;
+          if (j.isGloballyPublished) return true;
+          return (j.departmentApprovals || []).some((da) => da.status === 'Published');
+        });
+
+        const pendingJobs = (jobsData.jobs || []).filter((j) => {
+          if (isAdmin) {
+            return (j.departmentApprovals || []).some((da) => da.status === 'Pending');
+          }
+          if (inChargeDept) {
+            return (j.departmentApprovals || []).some(
+              (da) => da.department === inChargeDept && da.status === 'Pending'
+            );
+          }
+          return false;
+        });
+
+        const filteredJobs = (hiringSubTab === 'approvals' ? pendingJobs : publishedJobs).filter((j) => {
+          const q = (localSearch.updates || '').toLowerCase();
+          if (!q) return true;
+          return (
+            (j.company || '').toLowerCase().includes(q) ||
+            (j.role || '').toLowerCase().includes(q) ||
+            (j.description || '').toLowerCase().includes(q) ||
+            (j.targetDepartments || []).join(' ').toLowerCase().includes(q)
+          );
+        });
+
+        return (
+          <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={[styles.sectionHeader, { color: theme.text }]}>💼 5. Campus Updates</Text>
+            <Text style={[styles.sectionSub, { color: theme.textMuted }]}>
+              Verified hiring radar, corporate openings & placement broadcasts targeted strictly by department and year.
+            </Text>
+
+            {/* SUB-TABS: Hiring Radar (Default) | Approvals (if In-Charge/Admin) | Post Opening */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 12 }}>
+              <TouchableOpacity
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: hiringSubTab === 'radar' ? theme.primary : theme.card,
+                    borderColor: hiringSubTab === 'radar' ? theme.accent : theme.border,
+                    paddingHorizontal: 14,
+                    paddingVertical: 8
+                  }
+                ]}
+                onPress={() => setHiringSubTab('radar')}
+              >
+                <Text style={{ color: hiringSubTab === 'radar' ? '#fff' : theme.text, fontWeight: '700', fontSize: 13 }}>
+                  💼 Hiring Radar ({publishedJobs.length})
+                </Text>
+              </TouchableOpacity>
+
+              {canReviewOrPost && (
+                <TouchableOpacity
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: hiringSubTab === 'approvals' ? theme.primary : theme.card,
+                      borderColor: hiringSubTab === 'approvals' ? theme.accent : theme.border,
+                      paddingHorizontal: 14,
+                      paddingVertical: 8
+                    }
+                  ]}
+                  onPress={() => setHiringSubTab('approvals')}
+                >
+                  <Text style={{ color: hiringSubTab === 'approvals' ? '#fff' : theme.text, fontWeight: '700', fontSize: 13 }}>
+                    📋 1-Tap Reviews {pendingJobs.length > 0 ? `(${pendingJobs.length} Pending)` : ''}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {canReviewOrPost && (
+                <TouchableOpacity
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: hiringSubTab === 'create' ? theme.primary : theme.card,
+                      borderColor: hiringSubTab === 'create' ? theme.accent : theme.border,
+                      paddingHorizontal: 14,
+                      paddingVertical: 8
+                    }
+                  ]}
+                  onPress={() => setHiringSubTab('create')}
+                >
+                  <Text style={{ color: hiringSubTab === 'create' ? '#fff' : theme.text, fontWeight: '700', fontSize: 13 }}>
+                    ➕ Post Opening
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <LocalizedSearchBar
+              sectionLabel="Updates & Hiring"
+              value={localSearch.updates}
+              onChange={(v) => updateLocalSearch('updates', v)}
+            />
+
+            {/* VIEW 1: POST OPENING FORM */}
+            {hiringSubTab === 'create' && (
+              <View style={[styles.resourceCard, { backgroundColor: theme.card, borderColor: theme.border, marginTop: 8 }]}>
+                <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 8 }]}>
+                  📝 Post New Hiring Opportunity
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 12 }}>
+                  Submit hiring details from LinkedIn or recruiters. AI Auto-Tagging will extract eligible departments and default target years.
+                </Text>
+
+                <Text style={[styles.label, { color: theme.text }]}>Company Name *</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. Google, Microsoft, Zoho, L&T..."
+                  placeholderTextColor={theme.textMuted}
+                  value={jobCompany}
+                  onChangeText={setJobCompany}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Role Title *</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. SDE Intern, Embedded Systems Trainee, Architect Intern..."
+                  placeholderTextColor={theme.textMuted}
+                  value={jobRole}
+                  onChangeText={setJobRole}
+                />
+
+                <View style={styles.rowBetween}>
+                  <View style={{ flex: 1, marginRight: 6 }}>
+                    <Text style={[styles.label, { color: theme.text }]}>Job Type</Text>
+                    <AccessibleChipGroup
+                      options={JOB_TYPES}
+                      selected={jobType}
+                      onSelect={setJobType}
+                    />
+                  </View>
+                </View>
+
+                <Text style={[styles.label, { color: theme.text, marginTop: 8 }]}>Location / Mode</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. Bengaluru / Hybrid / Remote"
+                  placeholderTextColor={theme.textMuted}
+                  value={jobLocation}
+                  onChangeText={setJobLocation}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Stipend / CTC</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. ₹45,000 / month, 8.5 LPA, As per industry standards"
+                  placeholderTextColor={theme.textMuted}
+                  value={jobStipend}
+                  onChangeText={setJobStipend}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Application URL (LinkedIn or Career Link) *</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="https://linkedin.com/jobs/view/... or career portal link"
+                  placeholderTextColor={theme.textMuted}
+                  value={jobApplyUrl}
+                  onChangeText={setJobApplyUrl}
+                  autoCapitalize="none"
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Application Deadline (Optional)</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. 25 Nov 2026, Rolling basis, End of month"
+                  placeholderTextColor={theme.textMuted}
+                  value={jobDeadline}
+                  onChangeText={setJobDeadline}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Job Description & Qualifications *</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: theme.surface,
+                      color: theme.text,
+                      borderColor: theme.border,
+                      height: 90,
+                      textAlignVertical: 'top'
+                    }
+                  ]}
+                  placeholder="Paste or summarize role description, required skills, eligibility criteria..."
+                  placeholderTextColor={theme.textMuted}
+                  value={jobDescription}
+                  onChangeText={setJobDescription}
+                  multiline
+                />
+
+                {/* AI AUTO-TAG BUTTON */}
+                <TouchableOpacity
+                  style={[
+                    styles.primaryBtn,
+                    {
+                      backgroundColor: theme.accent,
+                      marginVertical: 10,
+                      flexDirection: 'row',
+                      justifyContent: 'center',
+                      alignItems: 'center'
+                    }
+                  ]}
+                  onPress={handleAiAutoTag}
+                  disabled={jobAiTagging}
+                >
+                  {jobAiTagging ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={[styles.primaryBtnText, { color: '#000' }]}>
+                      ✨ Run AI Auto-Tagging (Depts & Default Years)
+                    </Text>
+                  )}
+                </TouchableOpacity>
+
+                {/* TARGET DEPARTMENTS CHIPS */}
+                <Text style={[styles.label, { color: theme.text, marginTop: 4 }]}>
+                  Eligible Departments ({jobTargetDepts.length} selected):
+                </Text>
+                <AccessibleChipGroup
+                  options={PROFILE_DEPARTMENTS}
+                  selected={jobTargetDepts}
+                  onSelect={setJobTargetDepts}
+                  multi
+                />
+
+                {/* TARGET YEARS CHIPS (Editable, with 1 & 2 as optional tags) */}
+                <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>
+                  Target Year Cohorts:
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 6 }}>
+                  Defaults set to 3rd & 4th years (+ 5th for ARCH/DS). 1st & 2nd years are optional for early internships/challenges.
+                </Text>
+                <View style={styles.chipWrap}>
+                  {[1, 2, 3, 4, 5].map((yr) => {
+                    const isSelected = jobTargetYears.includes(yr);
+                    const isOptionalEarlyYear = yr === 1 || yr === 2;
+                    return (
+                      <TouchableOpacity
+                        key={String(yr)}
+                        style={[
+                          styles.chip,
+                          {
+                            backgroundColor: isSelected ? theme.primary : theme.surface,
+                            borderColor: isSelected ? theme.accent : theme.border,
+                            paddingHorizontal: 12,
+                            paddingVertical: 7
+                          }
+                        ]}
+                        onPress={() => {
+                          if (isSelected) {
+                            setJobTargetYears(jobTargetYears.filter((y) => y !== yr));
+                          } else {
+                            setJobTargetYears([...jobTargetYears, yr].sort((a, b) => a - b));
+                          }
+                        }}
+                      >
+                        <Text style={{ color: isSelected ? '#fff' : theme.textSecondary, fontWeight: '700', fontSize: 12 }}>
+                          {`Year ${yr}`}{isOptionalEarlyYear ? ' (Optional)' : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {isAdmin && (
+                  <TouchableOpacity
+                    style={[
+                      styles.rowBetween,
+                      {
+                        backgroundColor: jobAdminImmediate ? theme.primarySoft : theme.surface,
+                        padding: 10,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: jobAdminImmediate ? theme.accent : theme.border,
+                        marginTop: 12
+                      }
+                    ]}
+                    onPress={() => setJobAdminImmediate(!jobAdminImmediate)}
+                  >
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={{ color: theme.text, fontWeight: 'bold', fontSize: 12 }}>
+                        👑 Admin Global Override: Publish Immediately
+                      </Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 10 }}>
+                        Bypasses in-charge approval and sends push notifications to all selected departments right away.
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 18 }}>{jobAdminImmediate ? '✅' : '⬜'}</Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={[
+                    styles.primaryBtn,
+                    { backgroundColor: theme.primary, marginTop: 16 }
+                  ]}
+                  onPress={handleCreateJob}
+                  disabled={jobSubmitting}
+                >
+                  {jobSubmitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.primaryBtnText}>
+                      🚀 Submit for Placement In-Charge Review
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* VIEW 2: 1-TAP REVIEWS & APPROVALS (For In-Charges & Admins) */}
+            {hiringSubTab === 'approvals' && (
+              <View style={{ marginTop: 8 }}>
+                {inChargeDept && (
+                  <View style={[styles.triggerBanner, { backgroundColor: theme.primarySoft, marginBottom: 10 }]}>
+                    <Text style={{ color: theme.accent, fontSize: 12, fontWeight: 'bold' }}>
+                      🎓 You are the Department Placement In-Charge for: {inChargeDept}
+                    </Text>
+                  </View>
+                )}
+                {isAdmin && (
+                  <View style={[styles.triggerBanner, { backgroundColor: '#fef3c7', borderColor: '#f59e0b', borderWidth: 1, marginBottom: 10 }]}>
+                    <Text style={{ color: '#b45309', fontSize: 12, fontWeight: 'bold' }}>
+                      👑 Administrator Global Mode: You can multi-select and override approvals for any or all departments at once.
+                    </Text>
+                  </View>
+                )}
+
+                {pendingJobs.length === 0 ? (
+                  <View style={[styles.resourceCard, { backgroundColor: theme.card, borderColor: theme.border, padding: 24, alignItems: 'center' }]}>
+                    <Text style={{ fontSize: 32, marginBottom: 8 }}>🎉</Text>
+                    <Text style={{ color: theme.text, fontWeight: 'bold', fontSize: 15 }}>
+                      No Pending Approvals
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                      All hiring opportunities targeting your eligible departments have been reviewed.
+                    </Text>
+                  </View>
+                ) : (
+                  pendingJobs.map((job) => {
+                    return (
+                      <View
+                        key={job._id}
+                        style={[
+                          styles.resourceCard,
+                          { backgroundColor: theme.card, borderColor: theme.border, marginBottom: 12 }
+                        ]}
+                      >
+                        <View style={styles.rowBetween}>
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text style={[styles.cardTitle, { color: theme.text }]}>
+                              {job.role}
+                            </Text>
+                            <Text style={{ color: theme.accent, fontSize: 13, fontWeight: 'bold', marginTop: 2 }}>
+                              🏢 {job.company} • 📍 {job.location}
+                            </Text>
+                          </View>
+                          <View style={[styles.badge, { backgroundColor: theme.primarySoft, borderColor: theme.accent, borderWidth: 1 }]}>
+                            <Text style={{ color: theme.accent, fontSize: 11, fontWeight: 'bold' }}>
+                              {job.jobType}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <Text style={{ color: theme.textSecondary, fontSize: 12, marginVertical: 6 }} numberOfLines={3}>
+                          {job.description}
+                        </Text>
+
+                        {/* Status across eligible departments */}
+                        <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: 'bold', marginTop: 4 }}>
+                          Department Review Status:
+                        </Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+                          {(job.departmentApprovals || []).map((da) => {
+                            const isApproved = da.status === 'Published';
+                            const isRejected = da.status === 'Rejected';
+                            const isMine = inChargeDept === da.department;
+                            return (
+                              <View
+                                key={da.department}
+                                style={{
+                                  paddingHorizontal: 8,
+                                  paddingVertical: 4,
+                                  borderRadius: 6,
+                                  borderWidth: 1,
+                                  backgroundColor: isApproved ? '#dcfce7' : isRejected ? '#fee2e2' : '#fef3c7',
+                                  borderColor: isApproved ? '#16a34a' : isRejected ? '#dc2626' : '#d97706',
+                                  flexDirection: 'row',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Text style={{
+                                  fontSize: 10,
+                                  fontWeight: 'bold',
+                                  color: isApproved ? '#166534' : isRejected ? '#991b1b' : '#92400e'
+                                }}>
+                                  {da.department}: {da.status}{isMine ? ' (You)' : ''}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+
+                        <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 10 }}>
+                          Target Cohorts: {job.targetYears?.map(y => `Yr ${y}`).join(', ')} • Compensation: {job.stipendOrSalary}
+                        </Text>
+
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <TouchableOpacity
+                            style={[
+                              styles.primaryBtn,
+                              { backgroundColor: theme.primary, flex: 1, paddingVertical: 10 }
+                            ]}
+                            onPress={() => handleOpenReviewModal(job)}
+                          >
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12, textAlign: 'center' }}>
+                              ⚡ 1-Tap Review & Approve
+                            </Text>
+                          </TouchableOpacity>
+
+                          {isAdmin && (
+                            <TouchableOpacity
+                              style={[
+                                styles.previewBtn,
+                                { borderColor: theme.danger, paddingHorizontal: 12 }
+                              ]}
+                              onPress={() => handleDeleteJob(job._id)}
+                            >
+                              <Text style={{ color: theme.danger, fontWeight: 'bold', fontSize: 12 }}>
+                                🗑️
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            )}
+
+            {/* VIEW 3: HIRING RADAR (Main Student / Campus Feed) */}
+            {hiringSubTab === 'radar' && (
+              <View style={{ marginTop: 8 }}>
+                {filteredJobs.length === 0 ? (
+                  <View style={[styles.resourceCard, { backgroundColor: theme.card, borderColor: theme.border, padding: 24, alignItems: 'center' }]}>
+                    <Text style={{ fontSize: 32, marginBottom: 8 }}>💼</Text>
+                    <Text style={{ color: theme.text, fontWeight: 'bold', fontSize: 15 }}>
+                      No Hiring Openings Found
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                      {localSearch.updates
+                        ? `No openings match "${localSearch.updates}".`
+                        : `No approved openings currently targeted to ${user.department} ${user.year ? `Year ${user.year}` : ''}.`}
+                    </Text>
+                  </View>
+                ) : (
+                  filteredJobs.map((job) => {
+                    return (
+                      <View
+                        key={job._id}
+                        style={[
+                          styles.resourceCard,
+                          { backgroundColor: theme.card, borderColor: theme.border, marginBottom: 12 }
+                        ]}
+                      >
+                        <View style={styles.rowBetween}>
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text style={[styles.cardTitle, { color: theme.text, fontSize: 16 }]}>
+                              {job.role}
+                            </Text>
+                            <Text style={{ color: theme.accent, fontSize: 13, fontWeight: 'bold', marginTop: 2 }}>
+                              🏢 {job.company}
+                            </Text>
+                          </View>
+                          <View style={[styles.badge, { backgroundColor: theme.primarySoft, borderColor: theme.accent, borderWidth: 1 }]}>
+                            <Text style={{ color: theme.accent, fontSize: 11, fontWeight: 'bold' }}>
+                              {job.jobType}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Meta Tags Row */}
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+                          <View style={{ backgroundColor: theme.surface, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                            <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+                              📍 {job.location || 'On-site / Hybrid'}
+                            </Text>
+                          </View>
+                          <View style={{ backgroundColor: theme.surface, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                            <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+                              💰 {job.stipendOrSalary || 'Competitive'}
+                            </Text>
+                          </View>
+                          {job.deadline ? (
+                            <View style={{ backgroundColor: theme.surface, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                              <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+                                ⏰ Deadline: {job.deadline}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+
+                        <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 19, marginVertical: 6 }}>
+                          {job.description}
+                        </Text>
+
+                        {/* Eligible Departments & Target Years */}
+                        <View style={{ backgroundColor: theme.surface, padding: 8, borderRadius: 8, marginVertical: 6 }}>
+                          <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: 'bold' }}>
+                            🎯 Eligible Departments: {(job.targetDepartments || []).join(', ')}
+                          </Text>
+                          <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
+                            🎓 Target Batches: {(job.targetYears || []).map(y => `Year ${y}`).join(', ')}
+                          </Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                          <TouchableOpacity
+                            style={[
+                              styles.primaryBtn,
+                              { backgroundColor: '#0284c7', flex: 1, paddingVertical: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }
+                            ]}
+                            onPress={() => {
+                              if (job.applyUrl) {
+                                Linking.openURL(job.applyUrl).catch(() =>
+                                  Alert.alert('Link Error', 'Unable to open application link.')
+                                );
+                              } else {
+                                Alert.alert('Notice', 'No application link provided.');
+                              }
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>
+                              Apply on LinkedIn / Portal ↗
+                            </Text>
+                          </TouchableOpacity>
+
+                          {isAdmin && (
+                            <TouchableOpacity
+                              style={[
+                                styles.previewBtn,
+                                { borderColor: theme.danger, paddingHorizontal: 12 }
+                              ]}
+                              onPress={() => handleDeleteJob(job._id)}
+                            >
+                              <Text style={{ color: theme.danger, fontWeight: 'bold', fontSize: 12 }}>
+                                🗑️
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            )}
+          </View>
+        );
+      }
 
       case 'laura':
         return (
@@ -1942,6 +2834,224 @@ function AuraWorkspace() {
           </View>
         );
 
+      case 'support': {
+        if (user.role !== 'Admin') {
+          return (
+            <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={[styles.sectionHeader, { color: theme.danger }]}>🛡️ Access Restricted</Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 13, marginTop: 8 }}>
+                The Support and Feedback Hub is strictly accessible to verified campus administrators.
+              </Text>
+            </View>
+          );
+        }
+
+        const totalTickets = supportTickets.length;
+        const openTickets = supportTickets.filter((t) => t.status === 'Open').length;
+        const investigatingTickets = supportTickets.filter((t) => t.status === 'Investigating').length;
+        const resolvedTickets = supportTickets.filter((t) => t.status === 'Resolved').length;
+
+        const filteredTickets = supportTickets.filter((t) => {
+          if (supportFilter !== 'All' && t.status !== supportFilter) return false;
+          const q = (localSearch.support || '').toLowerCase();
+          if (!q) return true;
+          return (
+            (t.title || '').toLowerCase().includes(q) ||
+            (t.description || '').toLowerCase().includes(q) ||
+            (t.reporterName || '').toLowerCase().includes(q) ||
+            (t.category || '').toLowerCase().includes(q)
+          );
+        });
+
+        return (
+          <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={[styles.sectionHeader, { color: theme.text }]}>🛠️ Support and Feedback Hub</Text>
+            <Text style={[styles.sectionSub, { color: theme.textMuted }]}>
+              Triage user bug reports, review device diagnostics, inspect screenshot evidence, and resolve technical tickets.
+            </Text>
+
+            {/* METRIC COUNTERS */}
+            <View style={{ flexDirection: 'row', gap: 8, marginVertical: 10 }}>
+              <View style={[styles.statBox, { backgroundColor: theme.card, flex: 1, padding: 8 }]}>
+                <Text style={{ color: theme.textMuted, fontSize: 10 }}>TOTAL</Text>
+                <Text style={[styles.statValue, { color: theme.text, fontSize: 18 }]}>{totalTickets}</Text>
+              </View>
+              <View style={[styles.statBox, { backgroundColor: '#fef2f2', flex: 1, padding: 8 }]}>
+                <Text style={{ color: '#991b1b', fontSize: 10, fontWeight: 'bold' }}>OPEN</Text>
+                <Text style={[styles.statValue, { color: '#dc2626', fontSize: 18 }]}>{openTickets}</Text>
+              </View>
+              <View style={[styles.statBox, { backgroundColor: '#fefce8', flex: 1, padding: 8 }]}>
+                <Text style={{ color: '#854d0e', fontSize: 10, fontWeight: 'bold' }}>INVESTIGATING</Text>
+                <Text style={[styles.statValue, { color: '#ca8a04', fontSize: 18 }]}>{investigatingTickets}</Text>
+              </View>
+              <View style={[styles.statBox, { backgroundColor: '#f0fdf4', flex: 1, padding: 8 }]}>
+                <Text style={{ color: '#166534', fontSize: 10, fontWeight: 'bold' }}>RESOLVED</Text>
+                <Text style={[styles.statValue, { color: '#16a34a', fontSize: 18 }]}>{resolvedTickets}</Text>
+              </View>
+            </View>
+
+            {/* STATUS FILTER CHIPS */}
+            <AccessibleChipGroup
+              options={['All', 'Open', 'Investigating', 'Resolved', 'Closed']}
+              selected={supportFilter}
+              onSelect={setSupportFilter}
+            />
+
+            <LocalizedSearchBar
+              sectionLabel="Support Tickets"
+              value={localSearch.support}
+              onChange={(v) => updateLocalSearch('support', v)}
+            />
+
+            {/* TICKET LIST */}
+            {filteredTickets.length === 0 ? (
+              <View style={[styles.resourceCard, { backgroundColor: theme.card, borderColor: theme.border, padding: 24, alignItems: 'center', marginTop: 10 }]}>
+                <Text style={{ fontSize: 32, marginBottom: 8 }}>🎉</Text>
+                <Text style={{ color: theme.text, fontWeight: 'bold', fontSize: 15 }}>
+                  No Bug Reports Found
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                  {supportFilter !== 'All' ? `No tickets under "${supportFilter}" status.` : 'No user-submitted bug reports.'}
+                </Text>
+              </View>
+            ) : (
+              filteredTickets.map((t) => {
+                const isCritical = t.severity === 'Critical';
+                const isHigh = t.severity === 'High';
+                const isResolved = t.status === 'Resolved' || t.status === 'Closed';
+
+                return (
+                  <View
+                    key={t._id}
+                    style={[
+                      styles.resourceCard,
+                      { backgroundColor: theme.card, borderColor: isCritical ? '#ef4444' : theme.border, marginBottom: 12 }
+                    ]}
+                  >
+                    <View style={styles.rowBetween}>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={[styles.cardTitle, { color: theme.text, fontSize: 15 }]}>
+                          {t.title}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
+                          📌 Category: {t.category}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <View style={{
+                          backgroundColor: isCritical ? '#fee2e2' : isHigh ? '#ffedd5' : '#e0f2fe',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 6
+                        }}>
+                          <Text style={{
+                            fontSize: 10,
+                            fontWeight: 'bold',
+                            color: isCritical ? '#991b1b' : isHigh ? '#9a3412' : '#0369a1'
+                          }}>
+                            {t.severity}
+                          </Text>
+                        </View>
+                        <View style={{
+                          backgroundColor: isResolved ? '#dcfce7' : t.status === 'Investigating' ? '#fef3c7' : '#fee2e2',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 6
+                        }}>
+                          <Text style={{
+                            fontSize: 10,
+                            fontWeight: 'bold',
+                            color: isResolved ? '#166534' : t.status === 'Investigating' ? '#92400e' : '#991b1b'
+                          }}>
+                            {t.status}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <Text style={{ color: theme.textSecondary, fontSize: 13, marginVertical: 6 }}>
+                      {t.description}
+                    </Text>
+
+                    {/* REPORTER & TELEMETRY BOX */}
+                    <View style={{ backgroundColor: theme.surface, padding: 8, borderRadius: 8, marginVertical: 6 }}>
+                      <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                        👤 Reported by: @{t.reporterUsername} ({t.reporterName}) • {t.reporterRole} ({t.reporterDepartment || 'All'})
+                      </Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
+                        📱 Device: {t.deviceInfo?.os} (v{t.deviceInfo?.osVersion}) • Screen: {t.deviceInfo?.screenDimensions} • App: {t.deviceInfo?.appVersion}
+                      </Text>
+                    </View>
+
+                    {/* SCREENSHOT BUTTON IF PRESENT */}
+                    {t.screenshotUrl && (
+                      <TouchableOpacity
+                        style={[
+                          styles.previewBtn,
+                          { borderColor: theme.accent, backgroundColor: theme.primarySoft, paddingVertical: 6, marginVertical: 4, alignItems: 'center' }
+                        ]}
+                        onPress={() => Linking.openURL(t.screenshotUrl).catch(() => Alert.alert('Error', 'Unable to open screenshot URL'))}
+                      >
+                        <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 11 }}>
+                          🖼️ View Attached Screenshot
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {t.adminNotes ? (
+                      <View style={{ backgroundColor: '#f0fdf4', padding: 8, borderRadius: 6, marginVertical: 4 }}>
+                        <Text style={{ color: '#166534', fontSize: 11 }}>
+                          💬 Admin Resolution Note: {t.adminNotes} (Resolved by {t.resolvedBy || 'Admin'})
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {/* ACTION CONTROLS */}
+                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+                      {t.status === 'Open' && (
+                        <TouchableOpacity
+                          style={[styles.primaryBtn, { backgroundColor: '#f59e0b', flex: 1, paddingVertical: 8 }]}
+                          onPress={() => handleUpdateTicketStatus(t._id, 'Investigating')}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>
+                            🔍 Investigate
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {t.status !== 'Resolved' && (
+                        <TouchableOpacity
+                          style={[styles.primaryBtn, { backgroundColor: '#10b981', flex: 1, paddingVertical: 8 }]}
+                          onPress={() => {
+                            setActiveTicketModal(t);
+                            setTicketAdminNotes(t.adminNotes || '');
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>
+                            ✅ Resolve Ticket
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {t.status !== 'Closed' && (
+                        <TouchableOpacity
+                          style={[styles.previewBtn, { borderColor: theme.textMuted, paddingHorizontal: 12, paddingVertical: 8 }]}
+                          onPress={() => handleUpdateTicketStatus(t._id, 'Closed')}
+                        >
+                          <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: 'bold' }}>
+                            Close
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        );
+      }
+
       case 'profile': {
         const profileConditionalYears = getConditionalYearOptions(editRole, editDept);
         return (
@@ -2148,6 +3258,159 @@ function AuraWorkspace() {
               <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 13 }}>
                 🔄 Check for Over-The-Air (OTA) Updates
               </Text>
+            </TouchableOpacity>
+          </View>
+        );
+      }
+
+      case 'help': {
+        if (user.role === 'Admin') {
+          return (
+            <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={[styles.sectionHeader, { color: theme.accent }]}>🛠️ Admin View</Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 13, marginTop: 8 }}>
+                Administrators manage bug reports and user assistance tickets in the dedicated "Support and Feedback Hub" tab.
+              </Text>
+            </View>
+          );
+        }
+
+        return (
+          <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={[styles.sectionHeader, { color: theme.text }]}>🆘 Help & Bug Report</Text>
+            <Text style={[styles.sectionSub, { color: theme.textMuted }]}>
+              Report technical glitches, app crashes, or request assistance. Diagnostics and device telemetry are automatically attached.
+            </Text>
+
+            {helpSuccess && (
+              <View style={[styles.triggerBanner, { backgroundColor: '#dcfce7', borderColor: '#16a34a', borderWidth: 1, marginBottom: 12 }]}>
+                <Text style={{ color: '#166534', fontWeight: 'bold', fontSize: 12 }}>
+                  ✅ Bug Report Submitted Successfully! Our engineering team will review the diagnostics and address the issue.
+                </Text>
+              </View>
+            )}
+
+            {/* PRESET BUG CATEGORY SELECTION */}
+            <Text style={[styles.label, { color: theme.text }]}>1. Select Bug Category *</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+              {BUG_CATEGORIES.map((cat) => {
+                const isSelected = helpCategory === cat;
+                return (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[
+                      styles.chip,
+                      {
+                        backgroundColor: isSelected ? theme.primary : theme.card,
+                        borderColor: isSelected ? theme.accent : theme.border,
+                        paddingHorizontal: 12,
+                        paddingVertical: 7
+                      }
+                    ]}
+                    onPress={() => setHelpCategory(cat)}
+                  >
+                    <Text style={{ color: isSelected ? '#fff' : theme.textSecondary, fontWeight: isSelected ? '700' : '500', fontSize: 12 }}>
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* SEVERITY LEVEL */}
+            <Text style={[styles.label, { color: theme.text, marginTop: 10 }]}>2. Severity Level</Text>
+            <AccessibleChipGroup
+              options={BUG_SEVERITIES}
+              selected={helpSeverity}
+              onSelect={setHelpSeverity}
+            />
+
+            {/* BUG TITLE */}
+            <Text style={[styles.label, { color: theme.text, marginTop: 10 }]}>3. Bug Summary Title *</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+              placeholder="e.g. App crashed when opening 3rd year syllabus PDF..."
+              placeholderTextColor={theme.textMuted}
+              value={helpTitle}
+              onChangeText={setHelpTitle}
+            />
+
+            {/* BUG DESCRIPTION */}
+            <Text style={[styles.label, { color: theme.text }]}>4. Detailed Description & Reproduction Steps *</Text>
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  backgroundColor: theme.card,
+                  color: theme.text,
+                  borderColor: theme.border,
+                  height: 100,
+                  textAlignVertical: 'top'
+                }
+              ]}
+              placeholder="Explain what you were doing, what went wrong, and any error message shown..."
+              placeholderTextColor={theme.textMuted}
+              value={helpDescription}
+              onChangeText={setHelpDescription}
+              multiline
+            />
+
+            {/* OPTIONAL SCREENSHOT ATTACHMENT */}
+            <Text style={[styles.label, { color: theme.text }]}>5. Screenshot Attachment (Optional)</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 6 }}>
+              <TouchableOpacity
+                style={[
+                  styles.previewBtn,
+                  { borderColor: theme.accent, backgroundColor: theme.primarySoft, paddingHorizontal: 14, paddingVertical: 9 }
+                ]}
+                onPress={handlePickScreenshot}
+              >
+                <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 12 }}>
+                  📸 {helpScreenshot ? 'Change Screenshot' : 'Attach Screenshot'}
+                </Text>
+              </TouchableOpacity>
+
+              {helpScreenshot && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                  <Text style={{ color: theme.text, fontSize: 11, flex: 1 }} numberOfLines={1}>
+                    📎 {helpScreenshot.name}
+                  </Text>
+                  <TouchableOpacity onPress={() => setHelpScreenshot(null)} style={{ padding: 4 }}>
+                    <Text style={{ color: theme.danger, fontWeight: 'bold' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* AUTOMATICALLY CAPTURED DEVICE DIAGNOSTICS CARD */}
+            <View style={{ backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1, borderRadius: 8, padding: 10, marginVertical: 12 }}>
+              <Text style={{ color: theme.accent, fontSize: 11, fontWeight: 'bold', marginBottom: 4 }}>
+                🔍 Telemetry & Device Diagnostics (Auto-Captured):
+              </Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+                • OS: {Platform.OS} (Version: {String(Platform.Version)}){'\n'}
+                • App Version: 2.0.0 (Expo SDK 58){'\n'}
+                • Screen Dimensions: {Math.round(width)} x {Math.round(height)} pt{'\n'}
+                • Account: @{user.username} ({user.role} • {user.department || 'Administration'})
+              </Text>
+            </View>
+
+            {/* SUBMIT BUTTON */}
+            <TouchableOpacity
+              style={[
+                styles.primaryBtn,
+                { backgroundColor: theme.primary, marginTop: 4 }
+              ]}
+              onPress={handleSubmitBugReport}
+              disabled={helpSubmitting}
+            >
+              {helpSubmitting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.primaryBtnText}>
+                  📤 Submit Bug Report & Diagnostics
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         );
@@ -2532,6 +3795,248 @@ function AuraWorkspace() {
         title={pdfModal.title}
         onClose={() => setPdfModal({ visible: false, url: '', title: '' })}
       />
+
+      {/* 1-TAP REVIEW & HIRING APPROVAL MODAL */}
+      {reviewJobModal && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setReviewJobModal(null)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+            <View style={{ backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1, borderRadius: 14, padding: 18, width: '100%', maxWidth: 520, maxHeight: '90%' }}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.cardTitle, { color: theme.text, fontSize: 17 }]}>
+                    ⚡ 1-Tap Opportunity Review
+                  </Text>
+                  <TouchableOpacity onPress={() => setReviewJobModal(null)} style={{ padding: 4 }}>
+                    <Text style={{ color: theme.textMuted, fontSize: 16, fontWeight: 'bold' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={{ color: theme.accent, fontSize: 13, fontWeight: 'bold', marginTop: 4 }}>
+                  🏢 {reviewJobModal.company} • {reviewJobModal.role} ({reviewJobModal.jobType})
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
+                  📍 {reviewJobModal.location} • 💰 {reviewJobModal.stipendOrSalary}
+                </Text>
+
+                <View style={{ backgroundColor: theme.surface, padding: 10, borderRadius: 8, marginVertical: 10 }}>
+                  <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
+                    {reviewJobModal.description}
+                  </Text>
+                </View>
+
+                {/* TARGET DEPARTMENTS TO APPROVE */}
+                <Text style={[styles.label, { color: theme.text, marginTop: 4 }]}>
+                  {user.role === 'Admin' ? '👑 Admin Override: Select Departments to Approve & Broadcast:' : `Department Approval: ${user.placementDepartment || user.department}`}
+                </Text>
+                {user.role === 'Admin' ? (
+                  <>
+                    <View style={{ flexDirection: 'row', gap: 8, marginVertical: 6 }}>
+                      <TouchableOpacity
+                        style={[styles.chip, { backgroundColor: theme.primarySoft, borderColor: theme.accent }]}
+                        onPress={() => setReviewSelectedDepts([...reviewJobModal.targetDepartments])}
+                      >
+                        <Text style={{ color: theme.accent, fontSize: 11, fontWeight: 'bold' }}>Select All Eligible</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.chip, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                        onPress={() => setReviewSelectedDepts([])}
+                      >
+                        <Text style={{ color: theme.textMuted, fontSize: 11 }}>Clear</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+                      {(reviewJobModal.targetDepartments || []).map((dept) => {
+                        const isSelected = reviewSelectedDepts.includes(dept);
+                        return (
+                          <TouchableOpacity
+                            key={dept}
+                            style={[
+                              styles.chip,
+                              {
+                                backgroundColor: isSelected ? theme.primary : theme.surface,
+                                borderColor: isSelected ? theme.accent : theme.border,
+                                paddingHorizontal: 10,
+                                paddingVertical: 6
+                              }
+                            ]}
+                            onPress={() => {
+                              if (isSelected) {
+                                setReviewSelectedDepts(reviewSelectedDepts.filter((d) => d !== dept));
+                              } else {
+                                setReviewSelectedDepts([...reviewSelectedDepts, dept]);
+                              }
+                            }}
+                          >
+                            <Text style={{ color: isSelected ? '#fff' : theme.textSecondary, fontWeight: 'bold', fontSize: 11 }}>
+                              {dept} {isSelected ? '✓' : ''}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : (
+                  <View style={{ backgroundColor: theme.primarySoft, padding: 8, borderRadius: 6, marginVertical: 6 }}>
+                    <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 12 }}>
+                      Department: {user.placementDepartment || user.department} (Your In-Charge Area)
+                    </Text>
+                  </View>
+                )}
+
+                {/* TARGET YEAR COHORTS (Editable, 3 & 4 default, 5 for ARCH/DS, 1 & 2 optional) */}
+                <Text style={[styles.label, { color: theme.text, marginTop: 8 }]}>
+                  Target Year Cohorts (Editable):
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 6 }}>
+                  Defaults: 3rd & 4th years (+ 5th for ARCH/DS). Tap to toggle 1st & 2nd years for internships.
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+                  {[1, 2, 3, 4, 5].map((yr) => {
+                    const isSelected = reviewSelectedYears.includes(yr);
+                    const isEarly = yr === 1 || yr === 2;
+                    return (
+                      <TouchableOpacity
+                        key={String(yr)}
+                        style={[
+                          styles.chip,
+                          {
+                            backgroundColor: isSelected ? theme.primary : theme.surface,
+                            borderColor: isSelected ? theme.accent : theme.border,
+                            paddingHorizontal: 10,
+                            paddingVertical: 6
+                          }
+                        ]}
+                        onPress={() => {
+                          if (isSelected) {
+                            setReviewSelectedYears(reviewSelectedYears.filter((y) => y !== yr));
+                          } else {
+                            setReviewSelectedYears([...reviewSelectedYears, yr].sort((a, b) => a - b));
+                          }
+                        }}
+                      >
+                        <Text style={{ color: isSelected ? '#fff' : theme.textSecondary, fontWeight: 'bold', fontSize: 11 }}>
+                          Year {yr}{isEarly ? ' (Optional)' : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* ACTION BUTTONS */}
+                <View style={{ gap: 8, marginTop: 14 }}>
+                  <TouchableOpacity
+                    style={[
+                      styles.primaryBtn,
+                      { backgroundColor: '#16a34a', paddingVertical: 12 }
+                    ]}
+                    onPress={() => handleApproveDepartment(reviewJobModal._id)}
+                    disabled={reviewApproving}
+                  >
+                    {reviewApproving ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={[styles.primaryBtnText, { textAlign: 'center' }]}>
+                        {user.role === 'Admin'
+                          ? `🚀 Broadcast to ${reviewSelectedDepts.length} Selected Dept(s)`
+                          : `✅ Approve & Broadcast to ${user.placementDepartment || user.department}`}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.previewBtn,
+                      { borderColor: theme.danger, paddingVertical: 10 }
+                    ]}
+                    onPress={() => handleRejectDepartment(reviewJobModal._id, user.placementDepartment || user.department)}
+                  >
+                    <Text style={{ color: theme.danger, fontWeight: 'bold', fontSize: 12, textAlign: 'center' }}>
+                      ❌ Reject for Department
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* RESOLVE SUPPORT TICKET MODAL (ADMIN ONLY) */}
+      {activeTicketModal && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setActiveTicketModal(null)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+            <View style={{ backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1, borderRadius: 14, padding: 18, width: '100%', maxWidth: 480 }}>
+              <View style={styles.rowBetween}>
+                <Text style={[styles.cardTitle, { color: theme.text, fontSize: 16 }]}>
+                  Resolve Support Ticket
+                </Text>
+                <TouchableOpacity onPress={() => setActiveTicketModal(null)} style={{ padding: 4 }}>
+                  <Text style={{ color: theme.textMuted, fontSize: 16, fontWeight: 'bold' }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={{ color: theme.accent, fontSize: 13, fontWeight: 'bold', marginTop: 4 }}>
+                {activeTicketModal.title}
+              </Text>
+              <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                Reporter: @{activeTicketModal.reporterUsername} ({activeTicketModal.reporterName}) • {activeTicketModal.category}
+              </Text>
+
+              <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>
+                Resolution Summary / Admin Notes:
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.surface,
+                    color: theme.text,
+                    borderColor: theme.border,
+                    height: 80,
+                    textAlignVertical: 'top'
+                  }
+                ]}
+                placeholder="Describe fix, workaround, or patch applied..."
+                placeholderTextColor={theme.textMuted}
+                value={ticketAdminNotes}
+                onChangeText={setTicketAdminNotes}
+                multiline
+              />
+
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                <TouchableOpacity
+                  style={[styles.previewBtn, { flex: 1, borderColor: theme.textMuted, paddingVertical: 10 }]}
+                  onPress={() => setActiveTicketModal(null)}
+                >
+                  <Text style={{ color: theme.textMuted, fontWeight: 'bold', textAlign: 'center' }}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { flex: 1, backgroundColor: '#10b981', paddingVertical: 10 }]}
+                  onPress={() => handleUpdateTicketStatus(activeTicketModal._id, 'Resolved')}
+                  disabled={ticketUpdating}
+                >
+                  {ticketUpdating ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={[styles.primaryBtnText, { textAlign: 'center' }]}>Confirm Resolved</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
