@@ -703,6 +703,10 @@ function AuraWorkspace() {
 
   const handleSaveOpportunityLink = async (oppId, newUrl) => {
     try {
+      if (!user?.isPrimaryAdmin) {
+        Alert.alert('Access Denied', 'Only the Primary Administrator is authorized to edit referral and opportunity links.');
+        return;
+      }
       if (!newUrl || !newUrl.trim().startsWith('http')) {
         Alert.alert('Invalid Link', 'Please enter a valid URL starting with http:// or https://');
         return;
@@ -724,6 +728,10 @@ function AuraWorkspace() {
 
   const handleCreateOpportunity = async () => {
     try {
+      if (!user?.isPrimaryAdmin) {
+        Alert.alert('Access Denied', 'Only the Primary Administrator is authorized to publish opportunities.');
+        return;
+      }
       if (!newOppTitle || !newOppProvider || !newOppDescription || !newOppActionUrl) {
         Alert.alert('Validation Error', 'Title, Provider, Description, and Destination URL are required.');
         return;
@@ -3228,7 +3236,7 @@ function AuraWorkspace() {
                   Curated national student initiatives, free engineering masterclasses, accredited hackathons, and certified developer tools.
                 </Text>
               </View>
-              {user?.role === 'Admin' && (
+              {user?.isPrimaryAdmin && (
                 <TouchableOpacity
                   accessibilityRole="button"
                   accessibilityLabel="Add New National Opportunity"
@@ -3287,8 +3295,8 @@ function AuraWorkspace() {
               onChange={(v) => updateLocalSearch('opportunities', v)}
             />
 
-            {/* ADMIN SUMMARY / CLICKS BANNER */}
-            {user?.role === 'Admin' && (
+            {/* PRIMARY ADMIN EXCLUSIVE SUMMARY / CLICKS BANNER */}
+            {user?.isPrimaryAdmin && (
               <View
                 style={{
                   backgroundColor: 'rgba(16, 185, 129, 0.08)',
@@ -3301,14 +3309,14 @@ function AuraWorkspace() {
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Text style={{ color: '#10b981', fontWeight: 'bold', fontSize: 12 }}>
-                    👑 Opportunity & Partner Analytics (Admin Only)
+                    👑 Opportunity & Referral Analytics (Primary Admin Exclusive)
                   </Text>
                   <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: '600' }}>
                     Total Student Clicks: {opportunities.reduce((acc, o) => acc + (o.clicks || 0), 0)}
                   </Text>
                 </View>
                 <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
-                  Students see these as official verified campus partner perks. Tap "⚙️ Edit Link" on any card to update its destination or referral URL.
+                  Students see these as official verified campus partner perks. Tap "⚙️ Link" on any card to update its destination or referral URL.
                 </Text>
               </View>
             )}
@@ -3410,8 +3418,8 @@ function AuraWorkspace() {
                       </View>
                     )}
 
-                    {/* ADMIN INLINE LINK EDITOR */}
-                    {user?.role === 'Admin' && isEditingThis && (
+                    {/* PRIMARY ADMIN INLINE LINK EDITOR */}
+                    {user?.isPrimaryAdmin && isEditingThis && (
                       <View
                         style={{
                           backgroundColor: theme.surfaceElevated,
@@ -3461,7 +3469,7 @@ function AuraWorkspace() {
                       </View>
                     )}
 
-                    {/* ACTION BUTTON & ADMIN BAR */}
+                    {/* ACTION BUTTON & PRIMARY ADMIN CONTROLS */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                       <TouchableOpacity
                         accessibilityRole="button"
@@ -3486,7 +3494,7 @@ function AuraWorkspace() {
                         </Text>
                       </TouchableOpacity>
 
-                      {user?.role === 'Admin' && (
+                      {user?.isPrimaryAdmin && (
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8, gap: 6 }}>
                           <TouchableOpacity
                             accessibilityRole="button"
@@ -5531,8 +5539,8 @@ function AuraWorkspace() {
         </Modal>
       )}
 
-      {/* ADD NEW OPPORTUNITY MODAL (ADMIN ONLY) */}
-      {showNewOppModal && (
+      {/* ADD NEW OPPORTUNITY MODAL (PRIMARY ADMIN ONLY) */}
+      {user?.isPrimaryAdmin && showNewOppModal && (
         <Modal
           visible={true}
           transparent={true}
