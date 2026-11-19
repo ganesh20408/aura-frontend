@@ -96,12 +96,20 @@ export const BUG_SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
 
 export const JOB_TYPES = ['Internship', 'Full-Time', 'Part-Time', 'Hiring Challenge'];
 
+export const OPPORTUNITY_CATEGORIES = [
+  'All',
+  'Webinars & Scholarships',
+  'Hackathons & Internships',
+  'Developer Tools & Perks'
+];
+
 export const BASE_ORDERED_TABS = [
   { key: 'dashboard', baseLabel: 'Smart Dashboard', shortLabel: 'Smart Feed', icon: '⚡', desc: 'Dept & Year personalized stream' },
   { key: 'library', baseLabel: 'Academic Library', shortLabel: 'Library', icon: '📚', desc: 'TRIZ Course ▸ Sem ▸ Type vault' },
   { key: 'qa', baseLabel: 'Q&A Board', shortLabel: 'Q&A Forum', icon: '💬', desc: 'Peer-to-peer discussion board' },
   { key: 'guides', baseLabel: 'Experiences & Guides', shortLabel: 'Guides', icon: '⭐', desc: 'Senior tips & 5-star ratings' },
   { key: 'updates', baseLabel: 'Campus Updates', shortLabel: 'Updates', icon: '💼', desc: 'Hiring radar & placement approvals' },
+  { key: 'opportunities', baseLabel: 'National Perks & Opportunities', shortLabel: 'Opportunities', icon: '🎯', desc: 'Free webinars, hackathons & developer packs' },
   { key: 'laura', baseLabel: 'Ask LAURA AI', shortLabel: 'LAURA AI', icon: '🤖', desc: 'Verified-only RAG assistant' },
   { key: 'upload', baseLabel: 'Upload Hub', shortLabel: 'Upload', icon: '☁️', desc: 'Uploadthing + AI auto-tagging' },
   { key: 'search', baseLabel: 'Global AI Search', shortLabel: 'Omni Search', icon: '🔍', desc: 'Unified Library, Q&A & Guides' },

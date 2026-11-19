@@ -44,7 +44,8 @@ import {
   JOB_TYPES,
   UPLOAD_TOPIC_PRESETS,
   GUIDE_TOPIC_PRESETS,
-  QNA_CLUB_CATEGORIES
+  QNA_CLUB_CATEGORIES,
+  OPPORTUNITY_CATEGORIES
 } from './src/constants/auraData';
 import { ThemeProvider, useAuraTheme } from './src/theme/ThemeContext';
 import AdaptiveNavigation from './src/components/AdaptiveNavigation';
@@ -271,6 +272,7 @@ function AuraWorkspace() {
     qa: '',
     guides: '',
     updates: '',
+    opportunities: '',
     laura: '',
     upload: '',
     search: '',
@@ -360,6 +362,22 @@ function AuraWorkspace() {
   const [guideContent, setGuideContent] = useState('');
   const [guideSelectedTopics, setGuideSelectedTopics] = useState([]);
   const [guideTopicFilter, setGuideTopicFilter] = useState('All');
+
+  // --- TAB: NATIONAL PERKS & OPPORTUNITIES ---
+  const [opportunities, setOpportunities] = useState([]);
+  const [selectedOppCategory, setSelectedOppCategory] = useState('All');
+  const [editingOppId, setEditingOppId] = useState(null);
+  const [editingOppUrl, setEditingOppUrl] = useState('');
+  const [showNewOppModal, setShowNewOppModal] = useState(false);
+  const [newOppTitle, setNewOppTitle] = useState('');
+  const [newOppCategory, setNewOppCategory] = useState('Webinars & Scholarships');
+  const [newOppProvider, setNewOppProvider] = useState('');
+  const [newOppBadge, setNewOppBadge] = useState('100% Free');
+  const [newOppDescription, setNewOppDescription] = useState('');
+  const [newOppPerks, setNewOppPerks] = useState('');
+  const [newOppActionUrl, setNewOppActionUrl] = useState('');
+  const [newOppActionText, setNewOppActionText] = useState('Register for Free');
+  const [newOppDeadline, setNewOppDeadline] = useState('Ongoing');
 
   // --- TAB 5: ASK LAURA AI ---
   const [lauraQuery, setLauraQuery] = useState('');
@@ -505,14 +523,15 @@ function AuraWorkspace() {
 
   const fetchAllData = async () => {
     try {
-      const [resList, qaList, guideList, noteList, statsRes, jobsRes, lbRes] = await Promise.all([
+      const [resList, qaList, guideList, noteList, statsRes, jobsRes, lbRes, oppsRes] = await Promise.all([
         axios.get(`${BACKEND_URL}/api/resources`, apiHeader),
         axios.get(`${BACKEND_URL}/api/qa`, apiHeader),
         axios.get(`${BACKEND_URL}/api/guides`, apiHeader),
         axios.get(`${BACKEND_URL}/api/notifications`, apiHeader),
         axios.get(`${BACKEND_URL}/api/profile/stats`, apiHeader),
         axios.get(`${BACKEND_URL}/api/jobs`, apiHeader).catch(() => ({ data: { jobs: [] } })),
-        axios.get(`${BACKEND_URL}/api/leaderboard`, apiHeader).catch(() => ({ data: { leaderboard: [] } }))
+        axios.get(`${BACKEND_URL}/api/leaderboard`, apiHeader).catch(() => ({ data: { leaderboard: [] } })),
+        axios.get(`${BACKEND_URL}/api/opportunities`, apiHeader).catch(() => ({ data: [] }))
       ]);
       setResources(resList.data);
       setQuestions(qaList.data);
@@ -522,6 +541,7 @@ function AuraWorkspace() {
       if (jobsRes.data) setJobsData(jobsRes.data);
       if (lbRes.data?.leaderboard) setLeaderboard(lbRes.data.leaderboard);
       if (lbRes.data?.currentUser) setCurrentUserPUPMeta(lbRes.data.currentUser);
+      if (oppsRes.data) setOpportunities(oppsRes.data);
       syncIncomingNotifications(noteList.data);
 
       if (user?.role === 'Admin') {
@@ -663,6 +683,76 @@ function AuraWorkspace() {
       Alert.alert('Auto-Tag Error', err.response?.data?.error || err.message);
     } finally {
       setIsAiAutoTaggingResource(false);
+    }
+  };
+
+  // --- OPPORTUNITY & REFFERAL ACTIONS ---
+  const handleOpenOpportunity = async (opp) => {
+    try {
+      axios.post(`${BACKEND_URL}/api/opportunities/${opp._id}/click`, {}, apiHeader).catch(() => {});
+      setOpportunities((prev) =>
+        prev.map((o) => (o._id === opp._id ? { ...o, clicks: (o.clicks || 0) + 1 } : o))
+      );
+      if (opp.actionUrl) {
+        await Linking.openURL(opp.actionUrl);
+      }
+    } catch (err) {
+      Alert.alert('Unable to open link', err.message);
+    }
+  };
+
+  const handleSaveOpportunityLink = async (oppId, newUrl) => {
+    try {
+      if (!newUrl || !newUrl.trim().startsWith('http')) {
+        Alert.alert('Invalid Link', 'Please enter a valid URL starting with http:// or https://');
+        return;
+      }
+      const res = await axios.put(
+        `${BACKEND_URL}/api/opportunities/${oppId}`,
+        { actionUrl: newUrl.trim() },
+        apiHeader
+      );
+      setOpportunities((prev) =>
+        prev.map((o) => (o._id === oppId ? res.data : o))
+      );
+      setEditingOppId(null);
+      Alert.alert('Link Updated', 'Official opportunity tracking link updated successfully!');
+    } catch (err) {
+      Alert.alert('Update Failed', err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleCreateOpportunity = async () => {
+    try {
+      if (!newOppTitle || !newOppProvider || !newOppDescription || !newOppActionUrl) {
+        Alert.alert('Validation Error', 'Title, Provider, Description, and Destination URL are required.');
+        return;
+      }
+      const res = await axios.post(
+        `${BACKEND_URL}/api/opportunities`,
+        {
+          title: newOppTitle,
+          category: newOppCategory,
+          provider: newOppProvider,
+          badge: newOppBadge,
+          description: newOppDescription,
+          perks: newOppPerks,
+          actionUrl: newOppActionUrl,
+          actionText: newOppActionText,
+          deadline: newOppDeadline
+        },
+        apiHeader
+      );
+      setOpportunities((prev) => [res.data, ...prev]);
+      setShowNewOppModal(false);
+      setNewOppTitle('');
+      setNewOppProvider('');
+      setNewOppDescription('');
+      setNewOppPerks('');
+      setNewOppActionUrl('');
+      Alert.alert('Perk Added', 'New verified opportunity published successfully!');
+    } catch (err) {
+      Alert.alert('Failed to Add', err.response?.data?.error || err.message);
     }
   };
 
@@ -3112,6 +3202,330 @@ function AuraWorkspace() {
         );
       }
 
+      case 'opportunities': {
+        const q = (localSearch.opportunities || '').toLowerCase();
+        const filteredOpportunities = opportunities.filter((opp) => {
+          const matchCat =
+            selectedOppCategory === 'All' || opp.category === selectedOppCategory;
+          if (!matchCat) return false;
+          if (!q) return true;
+          return (
+            (opp.title && opp.title.toLowerCase().includes(q)) ||
+            (opp.provider && opp.provider.toLowerCase().includes(q)) ||
+            (opp.description && opp.description.toLowerCase().includes(q)) ||
+            (opp.perks && opp.perks.some((p) => p.toLowerCase().includes(q)))
+          );
+        });
+
+        return (
+          <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={[styles.sectionHeader, { color: theme.text }]}>
+                  🎯 6. National Perks & Opportunities
+                </Text>
+                <Text style={[styles.sectionSub, { color: theme.textMuted }]}>
+                  Curated national student initiatives, free engineering masterclasses, accredited hackathons, and certified developer tools.
+                </Text>
+              </View>
+              {user?.role === 'Admin' && (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Add New National Opportunity"
+                  style={[styles.smallBadgeBtn, { backgroundColor: theme.primary, paddingHorizontal: 10, paddingVertical: 6 }]}
+                  onPress={() => setShowNewOppModal(true)}
+                >
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>➕ Add Perk</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* CATEGORY FILTER CHIPS */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 10 }}>
+              {OPPORTUNITY_CATEGORIES.map((cat) => {
+                const isSelected = selectedOppCategory === cat;
+                return (
+                  <TouchableOpacity
+                    key={cat}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Filter by ${cat}`}
+                    style={[
+                      styles.chip,
+                      {
+                        backgroundColor: isSelected ? theme.primary : theme.card,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                        marginRight: 8,
+                        paddingVertical: 6,
+                        paddingHorizontal: 12
+                      }
+                    ]}
+                    onPress={() => setSelectedOppCategory(cat)}
+                  >
+                    <Text
+                      style={{
+                        color: isSelected ? '#fff' : theme.text,
+                        fontSize: 12,
+                        fontWeight: isSelected ? '700' : '500'
+                      }}
+                    >
+                      {cat === 'All'
+                        ? '🌐 All Initiatives'
+                        : cat === 'Webinars & Scholarships'
+                        ? '🎓 Webinars & Scholarships'
+                        : cat === 'Hackathons & Internships'
+                        ? '🏆 Hackathons & Internships'
+                        : '🛠️ Developer Tools & Perks'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <LocalizedSearchBar
+              sectionLabel="National Opportunities"
+              value={localSearch.opportunities}
+              onChange={(v) => updateLocalSearch('opportunities', v)}
+            />
+
+            {/* ADMIN SUMMARY / CLICKS BANNER */}
+            {user?.role === 'Admin' && (
+              <View
+                style={{
+                  backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                  borderColor: '#10b981',
+                  borderWidth: 1,
+                  borderRadius: 8,
+                  padding: 10,
+                  marginBottom: 12
+                }}
+              >
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ color: '#10b981', fontWeight: 'bold', fontSize: 12 }}>
+                    👑 Opportunity & Partner Analytics (Admin Only)
+                  </Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: '600' }}>
+                    Total Student Clicks: {opportunities.reduce((acc, o) => acc + (o.clicks || 0), 0)}
+                  </Text>
+                </View>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
+                  Students see these as official verified campus partner perks. Tap "⚙️ Edit Link" on any card to update its destination or referral URL.
+                </Text>
+              </View>
+            )}
+
+            {/* OPPORTUNITIES LIST */}
+            {filteredOpportunities.length === 0 ? (
+              <View style={[styles.emptyBox, { borderColor: theme.border }]}>
+                <Text style={{ fontSize: 24, marginBottom: 4 }}>🎯</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center' }}>
+                  {localSearch.opportunities
+                    ? `No opportunities match "${localSearch.opportunities}".`
+                    : 'No opportunities currently available in this category.'}
+                </Text>
+              </View>
+            ) : (
+              filteredOpportunities.map((opp) => {
+                const isEditingThis = editingOppId === opp._id;
+                return (
+                  <View
+                    key={opp._id}
+                    style={[
+                      styles.card,
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: opp.isFeatured ? '#f59e0b' : theme.border,
+                        borderWidth: opp.isFeatured ? 1.5 : 1,
+                        marginBottom: 12,
+                        padding: 14,
+                        borderRadius: 12
+                      }
+                    ]}
+                  >
+                    {/* TOP BADGE & PROVIDER */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View
+                          style={{
+                            backgroundColor: theme.primarySoft,
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 6
+                          }}
+                        >
+                          <Text style={{ color: theme.primary, fontSize: 11, fontWeight: 'bold' }}>
+                            🏢 {opp.provider}
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 6
+                          }}
+                        >
+                          <Text style={{ color: '#059669', fontSize: 10, fontWeight: 'bold' }}>
+                            ✓ {opp.badge || '100% Free'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {opp.deadline && (
+                        <Text style={{ color: theme.textMuted, fontSize: 10 }}>
+                          ⏰ {opp.deadline}
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* TITLE */}
+                    <Text style={{ color: theme.text, fontSize: 15, fontWeight: 'bold', marginBottom: 4 }}>
+                      {opp.title}
+                    </Text>
+
+                    {/* DESCRIPTION */}
+                    <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 10 }}>
+                      {opp.description}
+                    </Text>
+
+                    {/* PERKS / HIGHLIGHTS PILLS */}
+                    {opp.perks && opp.perks.length > 0 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                        {opp.perks.map((perk, idx) => (
+                          <View
+                            key={idx}
+                            style={{
+                              backgroundColor: theme.surfaceElevated,
+                              borderColor: theme.border,
+                              borderWidth: 1,
+                              borderRadius: 4,
+                              paddingHorizontal: 6,
+                              paddingVertical: 2
+                            }}
+                          >
+                            <Text style={{ color: theme.textMuted, fontSize: 10, fontWeight: '500' }}>
+                              ✦ {perk}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* ADMIN INLINE LINK EDITOR */}
+                    {user?.role === 'Admin' && isEditingThis && (
+                      <View
+                        style={{
+                          backgroundColor: theme.surfaceElevated,
+                          borderColor: theme.accent,
+                          borderWidth: 1,
+                          borderRadius: 8,
+                          padding: 10,
+                          marginBottom: 10
+                        }}
+                      >
+                        <Text style={{ color: theme.text, fontSize: 11, fontWeight: 'bold', marginBottom: 4 }}>
+                          Edit Destination / Referral Tracking Link:
+                        </Text>
+                        <TextInput
+                          value={editingOppUrl}
+                          onChangeText={setEditingOppUrl}
+                          placeholder="https://..."
+                          placeholderTextColor={theme.textMuted}
+                          style={[
+                            styles.input,
+                            {
+                              backgroundColor: theme.surface,
+                              borderColor: theme.border,
+                              color: theme.text,
+                              fontSize: 12,
+                              paddingVertical: 6,
+                              marginBottom: 8
+                            }
+                          ]}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                        />
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                          <TouchableOpacity
+                            style={[styles.smallBadgeBtn, { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: 1 }]}
+                            onPress={() => setEditingOppId(null)}
+                          >
+                            <Text style={{ color: theme.textMuted, fontSize: 11 }}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.smallBadgeBtn, { backgroundColor: '#10b981' }]}
+                            onPress={() => handleSaveOpportunityLink(opp._id, editingOppUrl)}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>💾 Save Link</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* ACTION BUTTON & ADMIN BAR */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`${opp.actionText || 'Register for Free'} on ${opp.provider}`}
+                        style={[
+                          styles.primaryBtn,
+                          {
+                            flex: 1,
+                            backgroundColor: theme.primary,
+                            paddingVertical: 10,
+                            borderRadius: 8,
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            gap: 6
+                          }
+                        ]}
+                        onPress={() => handleOpenOpportunity(opp)}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>
+                          {opp.actionText || 'Register for Free (Official Portal)'} ↗
+                        </Text>
+                      </TouchableOpacity>
+
+                      {user?.role === 'Admin' && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8, gap: 6 }}>
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel="Edit Destination Link"
+                            style={[
+                              styles.smallBadgeBtn,
+                              { backgroundColor: theme.surfaceElevated, borderColor: theme.border, borderWidth: 1, paddingVertical: 9, paddingHorizontal: 8 }
+                            ]}
+                            onPress={() => {
+                              setEditingOppId(opp._id);
+                              setEditingOppUrl(opp.actionUrl || '');
+                            }}
+                          >
+                            <Text style={{ color: theme.accent, fontSize: 11, fontWeight: 'bold' }}>⚙️ Link</Text>
+                          </TouchableOpacity>
+
+                          <View
+                            style={{
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                              paddingVertical: 8,
+                              paddingHorizontal: 8,
+                              borderRadius: 6
+                            }}
+                          >
+                            <Text style={{ color: '#2563eb', fontSize: 11, fontWeight: 'bold' }}>
+                              👁️ {opp.clicks || 0}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        );
+      }
+
       case 'laura':
         return (
           <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -3890,13 +4304,85 @@ function AuraWorkspace() {
             )}
 
             {user.isPrimaryAdmin && (
-              <View style={{ backgroundColor: 'rgba(217, 119, 6, 0.12)', borderColor: '#d97706', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 12 }}>
-                <Text style={{ color: '#d97706', fontWeight: 'bold', fontSize: 12 }}>
-                  👑 Verified Main Administrator
+              <View
+                style={{
+                  backgroundColor: 'rgba(217, 119, 6, 0.12)',
+                  borderColor: '#d97706',
+                  borderWidth: 1.5,
+                  borderRadius: 10,
+                  padding: 12,
+                  marginBottom: 14
+                }}
+              >
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ color: '#d97706', fontWeight: 'bold', fontSize: 13 }}>
+                    👑 Primary Admin Dual-Account Switcher
+                  </Text>
+                  <View style={{ backgroundColor: '#d97706', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>EXCLUSIVE</Text>
+                  </View>
+                </View>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 3, marginBottom: 8, lineHeight: 16 }}>
+                  Switch seamlessly into any student or senior student account to participate as a student, and return back to Primary Admin anytime.
                 </Text>
-                <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
-                  Sole authority for account switching, perspective testing, and admin approvals.
+
+                {/* ONE-TAP STUDENT PERSONAS */}
+                <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: 'bold', marginBottom: 6 }}>
+                  ONE-TAP STUDENT PERSPECTIVE SWITCH:
                 </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                  {[
+                    { label: '🎓 Yr 1 CSE Student', params: { presetRole: 'Student', presetDepartment: 'CSE', presetYear: 1 } },
+                    { label: '🚀 Yr 3 ECE Senior', params: { presetRole: 'Senior Student', presetDepartment: 'ECE', presetYear: 3 } },
+                    { label: '💻 Yr 4 IT Senior', params: { presetRole: 'Senior Student', presetDepartment: 'IT', presetYear: 4 } },
+                    { label: '🏛️ Yr 5 ARCH Senior', params: { presetRole: 'Senior Student', presetDepartment: 'ARCH', presetYear: 5 } }
+                  ].map((persona) => (
+                    <TouchableOpacity
+                      key={persona.label}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Switch to ${persona.label}`}
+                      style={[
+                        styles.chip,
+                        {
+                          backgroundColor: theme.card,
+                          borderColor: theme.border,
+                          paddingVertical: 5,
+                          paddingHorizontal: 10,
+                          minHeight: 32
+                        }
+                      ]}
+                      onPress={() => handleSwitchPresetPersona(persona.params)}
+                    >
+                      <Text style={{ color: theme.text, fontSize: 11, fontWeight: '600' }}>
+                        {persona.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* REAL REGISTERED ACCOUNTS DIRECTORY BUTTON */}
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Switch into specific registered student or faculty account"
+                  style={[
+                    styles.secondaryBtn,
+                    {
+                      borderColor: '#d97706',
+                      backgroundColor: 'rgba(217, 119, 6, 0.15)',
+                      paddingVertical: 8,
+                      borderRadius: 6,
+                      flexDirection: 'row',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      gap: 6
+                    }
+                  ]}
+                  onPress={() => triggerTabTransition('approvals')}
+                >
+                  <Text style={{ color: '#d97706', fontSize: 12, fontWeight: 'bold' }}>
+                    👥 Switch to Any Registered Account in Directory ({adminUsers.length}) ↗
+                  </Text>
+                </TouchableOpacity>
               </View>
             )}
 
@@ -5040,6 +5526,149 @@ function AuraWorkspace() {
                   )}
                 </TouchableOpacity>
               </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* ADD NEW OPPORTUNITY MODAL (ADMIN ONLY) */}
+      {showNewOppModal && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowNewOppModal(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+            <View style={{ backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1, borderRadius: 14, padding: 18, width: '100%', maxWidth: 520, maxHeight: '90%' }}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.cardTitle, { color: theme.text, fontSize: 17 }]}>
+                    ➕ Publish National Opportunity / Perk
+                  </Text>
+                  <TouchableOpacity onPress={() => setShowNewOppModal(false)} style={{ padding: 4 }}>
+                    <Text style={{ color: theme.textMuted, fontSize: 16, fontWeight: 'bold' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 12 }}>
+                  Add a verified masterclass, hackathon, or student software developer pack.
+                </Text>
+
+                <Text style={[styles.label, { color: theme.text }]}>Opportunity Category:</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                  {['Webinars & Scholarships', 'Hackathons & Internships', 'Developer Tools & Perks'].map((c) => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[
+                        styles.chip,
+                        {
+                          backgroundColor: newOppCategory === c ? theme.primary : theme.surfaceElevated,
+                          borderColor: newOppCategory === c ? theme.primary : theme.border,
+                          paddingVertical: 5,
+                          paddingHorizontal: 8
+                        }
+                      ]}
+                      onPress={() => setNewOppCategory(c)}
+                    >
+                      <Text style={{ color: newOppCategory === c ? '#fff' : theme.text, fontSize: 11, fontWeight: '600' }}>
+                        {c}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={[styles.label, { color: theme.text }]}>Opportunity Title:</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. Free FAANG System Design & DSA Masterclass"
+                  placeholderTextColor={theme.textMuted}
+                  value={newOppTitle}
+                  onChangeText={setNewOppTitle}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Partner / Host Organization:</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. GeeksforGeeks, Scaler, Unstop, GitHub"
+                  placeholderTextColor={theme.textMuted}
+                  value={newOppProvider}
+                  onChangeText={setNewOppProvider}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Badge Label:</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. 100% Free, Govt / National Level"
+                  placeholderTextColor={theme.textMuted}
+                  value={newOppBadge}
+                  onChangeText={setNewOppBadge}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Description:</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border, minHeight: 60 }]}
+                  placeholder="Explain why students should participate..."
+                  placeholderTextColor={theme.textMuted}
+                  value={newOppDescription}
+                  onChangeText={setNewOppDescription}
+                  multiline
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Key Perks / Highlights (comma-separated):</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="Free Certificate, ₹0 Entry Fee, Open to All Years"
+                  placeholderTextColor={theme.textMuted}
+                  value={newOppPerks}
+                  onChangeText={setNewOppPerks}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Destination / Referral Link (URL):</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="https://..."
+                  placeholderTextColor={theme.textMuted}
+                  value={newOppActionUrl}
+                  onChangeText={setNewOppActionUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Button Label:</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="Register for Free (Official Portal)"
+                  placeholderTextColor={theme.textMuted}
+                  value={newOppActionText}
+                  onChangeText={setNewOppActionText}
+                />
+
+                <Text style={[styles.label, { color: theme.text }]}>Application Deadline / Timeframe:</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+                  placeholder="e.g. Closing This Weekend, Ongoing"
+                  placeholderTextColor={theme.textMuted}
+                  value={newOppDeadline}
+                  onChangeText={setNewOppDeadline}
+                />
+
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+                  <TouchableOpacity
+                    style={[styles.previewBtn, { flex: 1, borderColor: theme.textMuted, paddingVertical: 10 }]}
+                    onPress={() => setShowNewOppModal(false)}
+                  >
+                    <Text style={{ color: theme.textMuted, fontWeight: 'bold', textAlign: 'center' }}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.primaryBtn, { flex: 1, backgroundColor: theme.primary, paddingVertical: 10 }]}
+                    onPress={handleCreateOpportunity}
+                  >
+                    <Text style={[styles.primaryBtnText, { textAlign: 'center' }]}>Publish Perk 🚀</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           </View>
         </Modal>
